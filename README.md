@@ -56,7 +56,7 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 
 - **Testing code that includes dependencies you didn't write?** QA will isolate tests from network services using an OS-specific sandbox.
 
-- **Want to avoid merging new tests that could be flaky?** QA would new tests repeatedly to vet them for flakiness first. QA would also run tests with less CPU and I/O than normal to stress their assumptions. Merge with confidence if things look good, or debug with confidence using QA.
+- **Want to avoid merging new tests that could be flaky?** QA would run new tests repeatedly to vet them for flakiness first. QA would also run tests with less CPU and I/O than normal to stress their assumptions. Merge with confidence if things look good, or debug with confidence using QA.
 
 - **Debugging a flaky test?** QA will help you understand the rate of flakiness and help you to reproduce it. QA will make it easy to discover attributes relating to the failure and to search data across previous test failures in the wild.
 
