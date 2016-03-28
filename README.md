@@ -1,24 +1,29 @@
 # QA
 
-QA is a lightweight tool for running your tests. It is designed to be language-agnostic, to minimize boilerplate and to speed up your debugging dev cycle.
+QA is a lightweight tool for running your tests. It is designed to help you write higher quality code more quickly and with less drudgery. We aspire to make world-class testing practices, like auto-parallelizing tests across hundreds of machines, accessible to everyone.
 
-The software testing ecosystem seems to lag behind other parts of the software development pipeline (e.g. type systems, compiler technology, prototyping environments etc. to name a few). This is why we cannot have nice things. It's time to change this. The goal of the QA project is to provide a common set of protocols and sane tools that make world-class testing practices accessible to everyone.
- 
+For years, the software testing ecosystem has lagged behind other parts of the software development pipeline (e.g. type systems, compiler technology, prototyping environments etc. to name a few). It's time to change this.
+
 That's a lofty goal. As a start, we'll keep things simple.
 
 ## What can QA help me do today?
 
 Nothing yet, because we haven't release any source code or binaries yet. :(
 
+## What languages and test frameworks does QA support?
+
+None yet. Please open an issue to request one!
+
 ## What will QA help me do tomorrow?
 
-1. Avoid boilerplate. QA will auto-detect your language and test framework, assemble everything needed to run your tests, and then run them. It will provide a beautiful, easy to interpret report of test outcomes.
+1. Run your tests faster. Just run `qa` (in your project directory) and watch your test results scream by as they run in parallel. QA auto-detects your framework and provides a beautiful, easy to understand report. No Rakefile or other boilerplate necessary.
 
-2. A faster and more focused development cycle. QA will prioritize test ordering based on what's failed recently and what code you're changing.
+2. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose flaky, slow, and otherwise problematic tests.
 
-3. Distribute your test execution across many machines, to get results much faster. QA will package up everything needed for your test execution environment to operate on a remote machine.
+3. A faster and more focused development cycle. QA will prioritize test ordering based on what's failed recently and what files you're changing.
 
-4. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose problematic tests.
+4. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines and stream the results back to your terminal in real time.
+
 
 ## Getting started with QA
 
@@ -63,3 +68,53 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 
 - **Already merge a flaky test?** QA will integrate with your [issue tracker], so you can easily submit a new issue for a flaky test. Once the issue is assigned, QA can ignore the outcomes of those flaky tests to protect the integrity of your other (non-flaky) tests.
 
+## QA Roadmap
+
+### Basic functionality
+- [x] Write initial binary to detect simple Ruby minitest tests
+- [ ] Expand ruby test detection to rspec.
+- [ ] Attaching a custom reporter to test runner
+- [ ] Support for Go, Java, JavaScript, Python, PHP
+
+### Parallelization
+- [ ] TAP-J outputter to all test runners
+- [ ] Use TAP-J reporter
+- [ ] Parallelize test runs but still generate single TAP-J stream (and using the same reporter)
+
+### Scaling
+- [ ] Support for using external execution environments (e.g. hermit, AWS lambda)
+- [ ] Support for additional external execution environments, like Kubernetes, Mesos
+
+### Tracking stats / artifacts
+- [ ] Support for working with a local audit folder
+- [ ] Support for working with a remote audit folder (e.g. S3)
+- [ ] Generate trace file
+- [ ] Generate single html file report with results, audits, flakiness statistics
+- [ ] Add integration with system monitoring agents (e.g. performance copilot)
+
+### Flakiness
+- [ ] Fingerprint tests, augmenting TAP-J stream
+- [ ] Fingerprint AUT (application under test), augmenting TAP-J stream
+- [ ] Add TAP-J analysis tools, to detect rates of flakiness in tests
+- [ ] Add support for marking some tests as (implicitly?) new, forcing them to be run many times and pass every time
+- [ ] Add support for marking tests as flaky, separating their results from the results of other tests
+- [ ] For tests that are failing (flaky or not), shows distribution of which line failed, test duration, version of code
+
+### Continuous integration
+- [ ] Add support for auto-filing issues (or updating existing issues) when a merged test fails that should not be flaky
+- [ ] Suggests which flaky tests to debug first (based on heuristics)
+
+### Local development
+- [ ] Order test run during local development based on what's failed recently
+- [ ] Line-level code coverage report
+- [ ] Rerunning tests during local development affected by what code you just modified (test code or AUT, using code coverage analysis)
+- [ ] Limit tests to files that are open in editor (open test files, open AUT files, etc)
+- [ ] Can run with git-bisect to search for commit that introduced a bug
+- [ ] Suggest which failing tests to debug first (based on heuristics)
+
+### Correctness
+- [ ] Add support to run tests in OS-specific sandbox for OS X
+- [ ] Add support for overriding network syscalls (e.g. DNS, TCP connections)
+- [ ] Add support for overriding time syscalls libfaketime
+- [ ] Add support for overriding filesystem syscalls with charybdefs
+- [ ] Provide a way to exactly reproduce failures (e.g. with Mozilla's rr)
