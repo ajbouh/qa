@@ -72,14 +72,14 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 
 ### Basic functionality
 - [x] Write initial binary to detect simple Ruby minitest tests
-- [ ] Expand ruby test detection to rspec.
-- [ ] Attaching a custom reporter to test runner
+- [x] Expand ruby test detection to rspec.
+- [x] Attaching a custom reporter to test runner
 - [ ] Support for Go, Java, JavaScript, Python, PHP
 
 ### Parallelization
-- [ ] TAP-J outputter to all test runners
-- [ ] Use TAP-J reporter
-- [ ] Parallelize test runs but still generate single TAP-J stream (and using the same reporter)
+- [x] TAP-J outputter to all test runners
+- [x] Use TAP-J reporter
+- [x] Parallelize test runs but still generate single TAP-J stream (and using the same reporter)
 
 ### Scaling
 - [ ] Support for using external execution environments (e.g. hermit, AWS lambda)

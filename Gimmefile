@@ -1,0 +1,26 @@
+{
+  "targets": {
+    "qa": {
+      "deps": {
+        "build": [
+          "vendor/go:go",
+          "vendor/go-bindata:go-bindata",
+
+          // For testing.
+          "vendor/ruby:ruby",
+          "vendor/minitest:minitest",
+          "vendor/test-unit:test-unit",
+          "vendor/rspec:rspec"
+        ]
+      },
+      "commands": [
+        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/tapj",
+        "env GOPATH=$PWD:$GIMME_SCRATCH go build -o $GIMME_OUTPUT/bin/qa qa/main",
+        "cd test-cli; env GOPATH=$PWD/..:$GIMME_SCRATCH PATH=$GIMME_OUTPUT/bin:$PATH go test"
+      ],
+      "prepend-platform-env": {
+        "PATH": ["bin"]
+      }
+    }
+  }
+}
