@@ -1,13 +1,15 @@
-package reporters
+package reporting
 
 import (
 	"fmt"
 	"io"
-	"qa/tapj"
-	"qa/tapj/analysis"
+	"qa/analysis"
+	"qa/tapjio"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 )
@@ -15,13 +17,21 @@ import (
 type Pretty struct {
 	Writer        io.Writer
 	Jobs          int
-	lastCase      *tapj.CaseEvent
+	lastCase      *tapjio.CaseEvent
 	totalTests    int
 	finishedTests int
 	timeCop       analysis.TimeCop
 }
 
-func (self *Pretty) SuiteStarted(suite tapj.SuiteEvent) error {
+func (self *Pretty) Event(event interface{}) error {
+	return nil
+}
+
+func (self *Pretty) TraceEvent(trace tapjio.TraceEvent) error {
+	return nil
+}
+
+func (self *Pretty) SuiteStarted(suite tapjio.SuiteEvent) error {
 	self.totalTests = suite.Count
 	self.finishedTests = 0
 	fmt.Fprintf(self.Writer, "Running suite of %d tests (jobs: %d, seed: %d)\n\n",
@@ -32,8 +42,12 @@ func (self *Pretty) SuiteStarted(suite tapj.SuiteEvent) error {
 	return nil
 }
 
-func (self *Pretty) TestFinished(cases []tapj.CaseEvent, test tapj.TestEvent) error {
-	self.timeCop.TestFinished(cases, test)
+func (self *Pretty) TestStarted(test tapjio.TestEvent) error {
+	return nil
+}
+
+func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
+	self.timeCop.TestFinished(test)
 
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
@@ -41,18 +55,18 @@ func (self *Pretty) TestFinished(cases []tapj.CaseEvent, test tapj.TestEvent) er
 	cyan := color.New(color.FgCyan).SprintFunc()
 	bold := color.New(color.Bold).SprintFunc()
 
-	label := tapj.TestLabel(cases, test)
+	label := tapjio.TestLabel(test)
 	var status string
 	switch test.Status {
-	case tapj.Pass:
+	case tapjio.Pass:
 		status = green("✔") // " PASS"
-	case tapj.Fail:
+	case tapjio.Fail:
 		status = red("✖") // " FAIL"
-	case tapj.Error:
+	case tapjio.Error:
 		status = magenta("‼") // "ERROR"
-	case tapj.Omit:
+	case tapjio.Omit:
 		status = cyan("Ø") // " OMIT"
-	case tapj.Todo:
+	case tapjio.Todo:
 		status = cyan("…") // " SKIP"
 	default:
 		status = red("?")
@@ -62,11 +76,11 @@ func (self *Pretty) TestFinished(cases []tapj.CaseEvent, test tapj.TestEvent) er
 
 	description := fmt.Sprintf("%s", bold(label))
 
-	fmt.Fprintf(self.Writer, "%s  %-50s [%d/%d] %.3fs\n",
+	fmt.Fprintf(self.Writer, "%s  %-50s [%d/%d] %v\n",
 		status,
 		description,
 		self.finishedTests, self.totalTests,
-		test.Time)
+		millisDuration(test.Time))
 
 	if test.Exception != nil {
 		// fmt.Fprintf(self.Writer, "%s\n\n", indent(test.Exception.Class, 3))
@@ -127,8 +141,12 @@ func maybePlural(n int, singular string, plural string) string {
 	return plural
 }
 
-func (self *Pretty) SuiteFinished(suite tapj.SuiteEvent, final tapj.FinalEvent) error {
-	self.timeCop.SuiteFinished(suite, final)
+func millisDuration(seconds float64) time.Duration {
+	return time.Duration(seconds * 1000) * time.Millisecond
+}
+
+func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
+	self.timeCop.SuiteFinished(final)
 
 	boldYellow := color.New(color.Bold, color.FgYellow).SprintFunc()
 
@@ -164,26 +182,35 @@ func (self *Pretty) SuiteFinished(suite tapj.SuiteEvent, final tapj.FinalEvent) 
 			cyan(counts.Omit, maybePlural(counts.Omit, " omit", " omits")))
 	}
 
-	fmt.Fprintf(self.Writer, "\nFinished %d tests in %.3f seconds: %s.\n",
+	fmt.Fprintf(self.Writer, "\n🏁  Finished %d tests in %v (%v of job time): %s.\n",
 		counts.Total,
-		final.Time,
+		millisDuration(final.Time),
+		millisDuration(self.timeCop.TotalDuration),
 		strings.Join(countLabels, ", "))
 
 	// If there are errors/fails don't show any SLOW PASSes
 	if self.timeCop.Passed() && len(self.timeCop.SlowPassingOutcomes) > 0 {
 		fmt.Fprintf(self.Writer, "\n")
 
+		// NOTE(adamb) Job time only == real time if jobs == 1. This is because
+		//     jobs execute in parallel, thus 2 seconds of job time might only
+		//     take 1 second of real time if split equally between two jobs.
 		fmt.Fprintf(self.Writer,
-			boldYellow("%d %s took > %.3fs to pass (the %d %s took %.3fs or less):\n"),
+			boldYellow("The %d slowest %s took %v or %.f%% of job time (the %d %s %v):\n"),
 			len(self.timeCop.SlowPassingOutcomes),
 			maybePlural(len(self.timeCop.SlowPassingOutcomes), "test", "tests"),
-			self.timeCop.ThresholdDuration,
+			millisDuration(self.timeCop.TotalSlowPassingDuration),
+			self.timeCop.TotalSlowPassingDuration / self.timeCop.TotalDuration * 100,
 			len(self.timeCop.FastPassingOutcomes),
-			maybePlural(len(self.timeCop.FastPassingOutcomes), "other", "others"),
-			self.timeCop.SlowestFastPassingDuration)
+			maybePlural(len(self.timeCop.FastPassingOutcomes), "other took", "others took ≤"),
+			millisDuration(self.timeCop.SlowestFastPassingDuration))
 
-		for _, outcome := range self.timeCop.SlowPassingOutcomes {
-			fmt.Fprintf(self.Writer, "🐌  %-59s %.3fs\n", boldYellow(outcome.Label), outcome.Duration)
+		slowPassingOutcomes := self.timeCop.SlowPassingOutcomes
+		sort.Sort(sort.Reverse(analysis.ByOutcomeDuration(slowPassingOutcomes)))
+		for _, outcome := range slowPassingOutcomes {
+			fmt.Fprintf(self.Writer, "🐌  %-59s %v\n",
+					boldYellow(outcome.Label),
+					millisDuration(outcome.Duration))
 		}
 	}
 

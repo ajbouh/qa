@@ -1,7 +1,7 @@
 package analysis
 
 import (
-	"qa/tapj"
+	"qa/tapjio"
 )
 
 type TimeCop struct {
@@ -12,23 +12,32 @@ type TimeCop struct {
 	averagePassingDuration float64
 	totalPassingDuration   float64
 
+	TotalDuration              float64
+	TotalSlowPassingDuration   float64
 	ThresholdDuration          float64
 	SlowestFastPassingDuration float64
 	negativeOutcomes           []outcome
 }
 
+type ByOutcomeDuration []outcome
+func (a ByOutcomeDuration) Len() int           { return len(a) }
+func (a ByOutcomeDuration) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByOutcomeDuration) Less(i, j int) bool { return a[i].Duration < a[j].Duration }
+
 type outcome struct {
-	result   tapj.Status
+	result   tapjio.Status
 	Duration float64
 	Label    string
 }
 
-func (self *TimeCop) TestFinished(cases []tapj.CaseEvent, test tapj.TestEvent) {
+func (self *TimeCop) TestFinished(test tapjio.TestEvent) {
 	o := outcome{
 		Duration: test.Time,
-		Label:    tapj.TestLabel(cases, test),
+		Label:    tapjio.TestLabel(test),
 		result:   test.Status,
 	}
+
+	self.TotalDuration += test.Time
 
 	self.outcomes = append(self.outcomes, o)
 	if o.result == "pass" {
@@ -39,11 +48,12 @@ func (self *TimeCop) TestFinished(cases []tapj.CaseEvent, test tapj.TestEvent) {
 	}
 }
 
-func (self *TimeCop) SuiteFinished(suite tapj.SuiteEvent, final tapj.FinalEvent) {
+func (self *TimeCop) SuiteFinished(final tapjio.FinalEvent) {
 	// Assuming we have any, compute average and threshold durations.
 	if len(self.passingOutcomes) > 0 {
 		self.averagePassingDuration = self.totalPassingDuration / float64(len(self.passingOutcomes))
-		self.ThresholdDuration = self.averagePassingDuration * 1.10
+		self.ThresholdDuration = self.averagePassingDuration * 2.0
+		self.TotalSlowPassingDuration = 0
 
 		for _, passingOutcome := range self.passingOutcomes {
 			if passingOutcome.Duration < self.ThresholdDuration {
@@ -53,6 +63,7 @@ func (self *TimeCop) SuiteFinished(suite tapj.SuiteEvent, final tapj.FinalEvent)
 				}
 			} else {
 				self.SlowPassingOutcomes = append(self.SlowPassingOutcomes, passingOutcome)
+				self.TotalSlowPassingDuration += passingOutcome.Duration
 			}
 		}
 	}

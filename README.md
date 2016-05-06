@@ -74,6 +74,7 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [x] Write initial binary to detect simple Ruby minitest tests
 - [x] Expand ruby test detection to rspec.
 - [x] Attaching a custom reporter to test runner
+- [ ] Use process forking to amortize cost of starting test runner
 - [ ] Support for Go, Java, JavaScript, Python, PHP
 
 ### Parallelization

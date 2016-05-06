@@ -14,9 +14,25 @@
         ]
       },
       "commands": [
-        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/tapj",
+        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio",
         "env GOPATH=$PWD:$GIMME_SCRATCH go build -o $GIMME_OUTPUT/bin/qa qa/main",
-        "cd test-cli; env GOPATH=$PWD/..:$GIMME_SCRATCH PATH=$GIMME_OUTPUT/bin:$PATH go test"
+        //"cd test-cli; env GOPATH=$PWD/..:$GIMME_SCRATCH PATH=$GIMME_OUTPUT/bin:$PATH go test"
+        "true"
+      ],
+      "prepend-platform-env": {
+        "PATH": ["bin"]
+      }
+    },
+    "qa+linux+x86_64": {
+      "deps": {
+        "build": [
+          "vendor/go:go",
+          "vendor/go-bindata:go-bindata"
+        ]
+      },
+      "commands": [
+        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio",
+        "env GOPATH=$PWD:$GIMME_SCRATCH GOOS=linux GOARCH=amd64 go build -o $GIMME_OUTPUT/bin/qa qa/main"
       ],
       "prepend-platform-env": {
         "PATH": ["bin"]
