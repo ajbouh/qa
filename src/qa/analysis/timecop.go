@@ -17,6 +17,8 @@ type TimeCop struct {
 	ThresholdDuration          float64
 	SlowestFastPassingDuration float64
 	negativeOutcomes           []outcome
+
+	MaxResults             int
 }
 
 type ByOutcomeDuration []outcome
@@ -33,7 +35,7 @@ type outcome struct {
 func (self *TimeCop) TestFinished(test tapjio.TestEvent) {
 	o := outcome{
 		Duration: test.Time,
-		Label:    tapjio.TestLabel(test),
+		Label:    tapjio.TestLabel(test.Label, test.Cases),
 		result:   test.Status,
 	}
 
@@ -65,6 +67,19 @@ func (self *TimeCop) SuiteFinished(final tapjio.FinalEvent) {
 				self.SlowPassingOutcomes = append(self.SlowPassingOutcomes, passingOutcome)
 				self.TotalSlowPassingDuration += passingOutcome.Duration
 			}
+		}
+
+		if self.MaxResults >= 0 && len(self.SlowPassingOutcomes) > self.MaxResults {
+			sparedPassingOutcomes := self.SlowPassingOutcomes[self.MaxResults:]
+			self.SlowPassingOutcomes = self.SlowPassingOutcomes[:self.MaxResults]
+			for _, sparedPassingOutcome := range sparedPassingOutcomes {
+				if sparedPassingOutcome.Duration > self.SlowestFastPassingDuration {
+					self.SlowestFastPassingDuration = sparedPassingOutcome.Duration
+				}
+				self.TotalSlowPassingDuration -= sparedPassingOutcome.Duration
+			}
+
+			self.FastPassingOutcomes = append(self.FastPassingOutcomes, sparedPassingOutcomes...)
 		}
 	}
 }

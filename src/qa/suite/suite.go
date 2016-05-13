@@ -46,20 +46,10 @@ func (self *testSuiteRunner) Run(
 	visitor tapjio.Visitor) (final tapjio.FinalEvent, err error) {
 	startTime := time.Now().UTC()
 
-	suite := tapjio.SuiteEvent{
-		Type:  "suite", // TODO(adamb) Figure out how to make Type implied.
-		Start: startTime.Format("2006-01-02 15:04:05"),
-		Count: self.count,
-		Seed:  self.seed,
-		Rev:   4,
-	}
+	suite := tapjio.NewSuiteEvent(startTime, self.count, self.seed)
+	final = *tapjio.NewFinalEvent(suite)
 
-	final = tapjio.FinalEvent{
-		Type:  "final", // TODO(adamb) Figure out how to make Type implied.
-		Suite: suite,
-	}
-
-	err = visitor.SuiteStarted(suite)
+	err = visitor.SuiteStarted(*suite)
 	if err != nil {
 		return
 	}
@@ -87,6 +77,7 @@ func (self *testSuiteRunner) Run(
 	var abort = false
 	var traceChan = make(chan tapjio.TraceEvent, maxJobs)
 	var testResultChan = make(chan testResult, maxJobs)
+	var testStartChan = make(chan tapjio.TestStartedEvent, maxJobs)
 
 	var awaitJobs sync.WaitGroup
 	awaitJobs.Add(maxJobs)
@@ -106,6 +97,10 @@ func (self *testSuiteRunner) Run(
 					testRunner.Run(
 						map[string]string{"QA_WORKER": fmt.Sprintf("%d", i)},
 						tapjio.DecodingCallbacks{
+							OnTestBegin: func(test tapjio.TestStartedEvent) error {
+								testStartChan <- test
+								return nil
+							},
 							OnTest: func(test tapjio.TestEvent) error {
 								testResultChan <- testResult{test, nil}
 								return nil
@@ -130,47 +125,38 @@ func (self *testSuiteRunner) Run(
 		close(traceChan)
 	}()
 
-	for final.Counts.Total < suite.Count || traceChan != nil {
+	for traceChan != nil {
 		select {
 		case trace, ok := <-traceChan:
 			if !ok {
 				traceChan = nil
 				continue
 			}
+
 			err = visitor.TraceEvent(trace)
 			if err != nil {
 				return
 			}
+		case testStart := <-testStartChan:
+			err = visitor.TestStarted(testStart)
+			if err != nil {
+				return
+			}
 		case testResult := <-testResultChan:
-			final.Counts.Total += 1
-
 			err = testResult.testError
 			if err == nil {
 				test := testResult.testEvent
-				switch test.Status {
-				case tapjio.Pass:
-					final.Counts.Pass += 1
-				case tapjio.Fail:
-					final.Counts.Fail += 1
-				case tapjio.Error:
-					final.Counts.Error += 1
-				case tapjio.Omit:
-					final.Counts.Omit += 1
-				case tapjio.Todo:
-					final.Counts.Todo += 1
-				}
+				(&final.Counts).Increment(test.Status)
 
 				err = visitor.TestFinished(test)
 				if err != nil {
 					return
 				}
-			} else {
-				final.Counts.Error += 1
 			}
 
 			if err != nil {
 				abort = true
-				final.Counts.Error += 1
+				(&final.Counts).Increment(tapjio.Error)
 				fmt.Fprintln(os.Stderr, "Error:", err)
 				return
 			}

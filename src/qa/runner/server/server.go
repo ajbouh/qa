@@ -108,7 +108,10 @@ func (s *Server) Run() error {
 				delete(s.visitors, accept.token)
 
 				go func() {
-					tapjio.Decode(*accept.conn, visitor)
+					err := tapjio.Decode(*accept.conn, visitor)
+					if err != nil {
+						log.Fatal("Error in server: ", err)
+					}
 				}()
 			}
 
@@ -120,15 +123,13 @@ func (s *Server) Run() error {
 					conn := *accept.conn
 					defer conn.Close()
 
+					encoder := json.NewEncoder(conn)
+
 					for value := range exposed {
-						var s []byte
-						s, err := json.Marshal(value)
-						if err != nil {
+						if err := encoder.Encode(value); err != nil {
 							fmt.Fprintln(os.Stderr, "error marshalling value:", value)
 							return
 						}
-
-						fmt.Fprintln(*accept.conn, string(s))
 					}
 				}()
 			}

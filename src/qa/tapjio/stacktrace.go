@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"qa/pprof"
 	"strconv"
 	"strings"
@@ -26,7 +25,13 @@ type stacktraceEmitter struct {
 	writer io.Writer
 }
 
-func decodeFlamegraphSample(writer io.Writer, traceMap map[string]interface{}) error {
+func decodeFlamegraphSample(writer io.Writer, bytes []byte) error {
+	traceMap := make(map[string](interface{}))
+	err := json.Unmarshal(bytes, &traceMap)
+	if err != nil {
+		return err
+	}
+
 	x, ok := traceMap["args"]
 	if !ok {
 		return nil
@@ -61,7 +66,84 @@ func decodeFlamegraphSample(writer io.Writer, traceMap map[string]interface{}) e
 	return nil
 }
 
-func decodePprof(writer io.Writer, traceMap map[string]interface{}) error {
+type encodedProfile struct {
+	Samples        []int    `json:"samples"`
+	SymbolPrefixes []int    `json:"symbolPrefixes"`
+	BaseSymbols    []string `json:"symbols"`
+}
+
+// TODO(adamb) Properly unmarshal bytes in other two decoders.
+//     In complex decoder, unmarshal bytes to encodedProfile struct,
+//     then build proper symbol table (possibly lazily) from encodedProfile.
+//     Use built symbol table to emit stacktrace writer.
+//     Use msgpack (if available in ruby subprocess!) to shrink data size even further?
+//     Consider defining TAP-MSGPACK (which is just TAP-J converted to msgpack)
+
+func decodeFlamegraphSampleV2(writer io.Writer, bytes []byte) error {
+	profile := encodedProfile{}
+	err := json.Unmarshal(bytes, &profile)
+	if err != nil {
+		return err
+	}
+
+	symbolPrefixes := profile.SymbolPrefixes
+	prev := ""
+	useSymbols := make([]string, len(profile.BaseSymbols))
+	for ix, baseSymbol := range profile.BaseSymbols {
+		prefixLen := symbolPrefixes[ix]
+		var symbol string
+		if prefixLen > 0 {
+			symbol = prev[0:prefixLen] + baseSymbol
+		} else {
+			symbol = baseSymbol
+		}
+		useSymbols[ix] = symbol
+		prev = symbol
+	}
+
+	i := 0
+	samples := profile.Samples
+	for i < len(samples) {
+		frameLength := samples[i]
+		i++
+		first := true
+		previousSymbol := ""
+		for frameLength > 0 {
+			sample := samples[i]
+			i++
+			frameLength--
+			symbol := useSymbols[sample]
+			if strings.HasPrefix(symbol, "block ") {
+				continue
+			}
+			if strings.HasPrefix(symbol, "RSpec::") {
+				symbol = "RSpec::..."
+			}
+			if symbol == "RSpec::..." && previousSymbol == symbol {
+				continue
+			}
+
+			previousSymbol = symbol
+			if first {
+				first = false
+			} else {
+				fmt.Fprintf(writer, ";")
+			}
+			fmt.Fprintf(writer, "%s", symbol)
+		}
+		fmt.Fprintf(writer, " %d\n", samples[i])
+		i++
+	}
+
+	return nil
+}
+
+func decodePprof(writer io.Writer, jsonBytes []byte) error {
+	traceMap := make(map[string](interface{}))
+	err := json.Unmarshal(jsonBytes, &traceMap)
+	if err != nil {
+		return err
+	}
 
 	x, ok := traceMap["args"]
 	if !ok {
@@ -309,27 +391,39 @@ func NewStacktraceEmitter(writer io.Writer) *stacktraceEmitter {
 }
 
 func (t *stacktraceEmitter) TraceEvent(event TraceEvent) error {
-	traceBytes, _ := event.Trace.MarshalJSON()
-	traceMap := make(map[string]interface{})
+	data := event.Data
 
-	err := json.Unmarshal(traceBytes, &traceMap)
-	if err != nil {
-		log.Fatal("Could not decode to trace event:", err, event.Trace)
-		return err
+	if data.Name == "flamegraph sample" {
+		argsBytes, err := data.Args.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		return decodeFlamegraphSample(t.writer, argsBytes)
 	}
 
-	if traceMap["name"] == "flamegraph sample" {
-		return decodeFlamegraphSample(t.writer, traceMap)
+	if data.Name == "flamegraph sample v2" {
+		argsBytes, err := data.Args.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		return decodeFlamegraphSampleV2(t.writer, argsBytes)
 	}
 
-	if traceMap["name"] == "pprof data" {
-		return decodePprof(t.writer, traceMap)
+	if data.Name == "pprof data" {
+		argsBytes, err := data.Args.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		return decodePprof(t.writer, argsBytes)
 	}
 
 	return nil
 }
 
-func (t *stacktraceEmitter) TestStarted(event TestEvent) error {
+func (t *stacktraceEmitter) TestStarted(event TestStartedEvent) error {
 	return nil
 }
 

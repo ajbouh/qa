@@ -29,9 +29,9 @@ func (t *TraceWriter) TraceEvent(event TraceEvent) error {
 		return err
 	}
 
-	err = t.encoder.Encode(event.Trace)
+	err = t.encoder.Encode(event.Data)
 	if err != nil {
-		log.Fatal("Could not encode event", err, event.Trace)
+		log.Fatal("Could not encode event", err, event.Data)
 		return err
 	}
 
@@ -48,7 +48,7 @@ func (t *TraceWriter) SuiteStarted(event SuiteEvent) error {
 	return nil
 }
 
-func (t *TraceWriter) TestStarted(event TestEvent) error {
+func (t *TraceWriter) TestStarted(event TestStartedEvent) error {
 	return nil
 }
 

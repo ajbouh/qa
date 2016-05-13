@@ -54,6 +54,49 @@ module Qa::Instrument
   end
 end
 
+class Qa::Stats::LinuxMemory
+  def initialize(pid)
+    @pid = pid
+    @last_sample = nil
+    @min_sample_period = 1
+  end
+
+  def sample
+    now = ::Qa::Time.now_f
+    return if @last_sample && ((now - @last_sample) < @min_sample_period)
+    @last_sample = now
+
+    h = {}
+
+    status = read_proc_file("status").scan(/(.*):[\t ]+(.*)/)
+    unless status.empty?
+      h['vm_size'] = status.find { |i| i.first == 'VmSize' }.last.split(' ').first.to_i * 1024.0
+      h['vm_rss'] = status.find { |i| i.first == 'VmRSS' }.last.split(' ').first.to_i * 1024.0
+    end
+
+    smaps = read_proc_file("smaps").scan(/(.*):[\t ]+(.*)/)
+    unless smaps.empty?
+      private_dirty = smaps.find_all { |i| i.first == 'Private_Dirty' }
+      shared_dirty = smaps.find_all { |i| i.first == 'Shared_Dirty' }
+
+      h['private_dirty_total'] = private_dirty.inject(0) { |i, pd| i + pd.last.split(' ').first.to_i } * 1024.0
+      h['shared_dirty_total'] = shared_dirty.inject(0) { |i, sc| i + sc.last.split(' ').first.to_i } * 1024.0
+    end
+
+    yield h
+  end
+
+  private
+
+  def read_proc_file(name)
+    begin
+      File.read(File.join("/proc/#{@pid}", name))
+    rescue Errno::EACCES
+      ""
+    end
+  end
+end
+
 class Qa::Strobe
   def self.start(*args, &b)
     new(*args, &b).start
@@ -260,7 +303,7 @@ class Qa::Stats::GcStats
   end
 end
 
-class Qa::Stats::Gc
+class Qa::Stats::GcRuby19
   def initialize
     @start_f = ::Qa::Time.now_f
     GC::Profiler.enable
@@ -301,6 +344,32 @@ class Qa::Stats::Gc
   end
 end
 
+class Qa::Stats::Gc
+  def initialize
+    @start_f = ::Qa::Time.now_f
+    ::GC::Profiler.enable
+  end
+
+  def sample
+    raw_data = ::GC::Profiler.raw_data
+    raw_data.each do |gc|
+      @last_gc = gc
+
+      # :GC_TIME # Time elapsed in seconds for this GC run
+      # :GC_INVOKE_TIME # Time elapsed in seconds from startup to when the GC was invoked
+      # :HEAP_USE_SIZE # Total bytes of heap used
+      # :HEAP_TOTAL_SIZE # Total size of heap in bytes
+      # :HEAP_TOTAL_OBJECTS # Total number of objects
+      # :GC_IS_MARKED # Returns true if the GC is in mark phase
+
+      yield(@start_f + gc.delete(:GC_INVOKE_TIME), gc.delete(:GC_TIME) * 1e3, gc)
+    end
+    ::GC::Profiler.clear unless raw_data.empty?
+
+    nil
+  end
+end
+
 # Outputs Trace Event Format designed to work with the chrome://tracing viewer.
 # The event format is documented here:
 #   https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/edit
@@ -328,13 +397,13 @@ class Qa::Trace
   # end
 
   @@stackprof = false
-  begin
-    # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
-    # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
-    require 'stackprof'
-    @@stackprof = true
-  rescue LoadError
-  end
+  # begin
+  #   # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
+  #   # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
+  #   require 'stackprof'
+  #   @@stackprof = true
+  # rescue LoadError
+  # end
 
   @@flamgraph_polling = !(@@ruby_prof || @@perftools || @@stackprof)
   @@flamgraph_polling = false
@@ -344,6 +413,7 @@ class Qa::Trace
     @b = b
     @cpu_stats = ::Qa::Stats::Cpu.new
     @gc_stats = ::Qa::Stats::Gc.new
+    @linux_memory = ::Qa::Stats::LinuxMemory.new('self')
 
     @perftool_pprof_file = nil
     @flamegraph_stats = nil
@@ -356,21 +426,12 @@ class Qa::Trace
 
     @tracers = []
     @uninstall_tracers = []
-
-    # define_tracer('Kernel#require(path)')
-    # define_tracer('Kernel#load')
-    define_tracer('ActiveRecord::ConnectionAdapters::Mysql2Adapter#execute(sql,name)')
-    define_tracer('ActiveSupport::Dependencies::Loadable#require(path)')
-    define_tracer('ActiveRecord::ConnectionAdapters::QueryCache#clear_query_cache')
-    define_tracer('ActiveRecord::ConnectionAdapters::SchemaCache#initialize')
-    define_tracer('ActiveRecord::ConnectionAdapters::SchemaCache#clear!')
-    define_tracer('ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!')
   end
 
   def start
-    @strobe = ::Qa::Strobe.new(0.25) do
-      emit_stats
-    end
+    # @strobe = ::Qa::Strobe.new(0.25) do
+    #   emit_stats
+    # end
 
     RubyProf.start if @@ruby_prof
 
@@ -406,7 +467,7 @@ class Qa::Trace
   end
 
   def stop
-    @strobe.stop
+    # @strobe.stop
     @ruby_prof_result = RubyProf.stop if @@ruby_prof
     if @@stackprof
       StackProf.stop
@@ -498,7 +559,7 @@ class Qa::Trace
     end
 
     if @stackprof_result
-      emit_stackprof_result(@stackprof_result)
+      emit_stackprof_result3(@stackprof_result)
     end
 
     if @perftool_pprof_file
@@ -517,6 +578,7 @@ class Qa::Trace
     emit_gc
     emit_threads
     emit_flamegraph
+    emit_shared_memory
 
     nil
   end
@@ -559,10 +621,115 @@ class Qa::Trace
   end
 
   FLAMEGRAPH_METRIC_NAME = 'flamegraph sample'.freeze
+  FLAMEGRAPH_METRIC_NAME_V2 = 'flamegraph sample v2'.freeze
   RSPEC_PREFIX = 'RSpec::'.freeze
   RSPEC_ELLIPSIS = 'RSpec::...'.freeze
   BLOCK_PREFIX = 'block '.freeze
   STACKTRACE_SEPARATOR = ';'.freeze
+
+  require 'set'
+  def emit_stackprof_result3(result)
+    raw = result[:raw]
+
+    # Build sorted symbol list.
+    symbol_set = SortedSet.new
+    symbol_set.add(RSPEC_ELLIPSIS)
+    result[:frames].each do |_, frame|
+      symbol_set.add(frame[:name])
+    end
+
+    symbols = symbol_set.to_a
+    symbol_set.clear
+
+    # Find index of symbol in sorted list.
+    symbol_range = 0...symbols.size
+    find_symbol_index = lambda do |symbol|
+      symbol_range.bsearch { |i| symbols[i] >= symbol }
+    end
+
+    i = 0
+    while len = raw[i]
+      i += 1
+      len.times do
+        a = raw[i]
+        full_name = result[:frames][a][:name]
+        raw[i] = find_symbol_index.call(full_name)
+        i += 1
+      end
+      i += 1
+    end
+
+    # Save some space by rewriting symbols to use prefix encoding.
+    prev = ''
+    symbol_prefixes = Array.new(symbols.length, 0)
+    prefix_ix = 0
+    symbols.map! do |symbol|
+      prefix_len = 0
+      symbol_len = symbol.size
+      prefix_len += 1 while symbol[prefix_len] == prev[prefix_len] && prefix_len < symbol_len
+      prev = symbol
+      # Expect to reuse the prefix of the previous symbol. Only keep the end of the string.
+      symbol_prefixes[prefix_ix] = prefix_len
+      prefix_ix += 1
+      symbol[prefix_len..-1]
+    end
+
+    emit(
+        NAME => FLAMEGRAPH_METRIC_NAME_V2,
+        PID => @pid,
+        TID => tid,
+        PH => PH_I,
+        TS => self.ts,
+        ARGS => {
+          'symbols' => symbols,
+          'symbolPrefixes' => symbol_prefixes,
+          'samples' => raw,
+        })
+  end
+
+  def emit_stackprof_result2(result)
+    raw = result[:raw]
+
+    functions = Hash.new { |h, k| h[k] = h.size }
+    counts = []
+
+    rspec_ellipsis_ix = functions[RSPEC_ELLIPSIS]
+
+    i = 0
+    while len = raw[i]
+      i += 1
+      key = []
+      len.times do
+        a = raw[i]
+        i += 1
+
+        full_name = result[:frames][a][:name]
+        next if full_name.start_with?(BLOCK_PREFIX)
+
+        if full_name.start_with?(RSPEC_PREFIX)
+          next if key[-1] == rspec_ellipsis_ix
+          full_name = RSPEC_ELLIPSIS
+        end
+
+        key << functions[full_name]
+      end
+      weight = raw[i]
+      i += 1
+
+      counts.push([key, weight])
+    end
+
+    emit(
+        NAME => FLAMEGRAPH_METRIC_NAME_V2,
+        PID => @pid,
+        TID => tid,
+        PH => PH_I,
+        TS => self.ts,
+        ARGS => {
+          'functions' => functions.keys,
+          'samples' => counts,
+        })
+  end
 
   def emit_stackprof_result(result)
     raw = result[:raw]
@@ -602,6 +769,34 @@ class Qa::Trace
         ARGS => {
           ARGS_DATA => counts,
         })
+  end
+
+  def emit_shared_memory
+    @linux_memory.sample do |shared_memory|
+      time_f = ::Qa::Time.now_f
+
+      vm_size = shared_memory['vm_size']
+      vm_rss = shared_memory['vm_rss']
+      emit(
+          NAME => 'vm stats',
+          PID => @pid,
+          PH => PH_C,
+          TS => ts(time_f) + 1,
+          ARGS => {
+            'other' => (vm_size && vm_rss) ? vm_size - vm_rss : nil,
+            'rss' => vm_rss,
+          })
+
+      emit(
+          NAME => 'shared memory stats',
+          PID => @pid,
+          PH => PH_C,
+          TS => ts(time_f) + 1,
+          ARGS => {
+            'shared_dirty_total' => shared_memory['shared_dirty_total'],
+            'private_dirty_total' => shared_memory['private_dirty_total'],
+          })
+    end
   end
 
   def emit_ruby_prof_result(result)
@@ -681,6 +876,7 @@ class Qa::Trace
   ARGS_RUNNING = 'running'.freeze
   ARGS_SLEEPING = 'sleeping'.freeze
   def emit_threads
+    return
     running = 0
     sleeping = 0
     statuses = Thread.list.each do |thr|
@@ -726,8 +922,10 @@ class Qa::Trace
   GC_HEAP_METRIC_NAME = 'heap bytes'.freeze
   ARGS_USED_SIZE_BYTES = 'used_size_bytes'.freeze
   ARGS_FREE_SIZE_BYTES = 'free_size_bytes'.freeze
-  GC_METRICS_KEY_USE = 'use_size_bytes'.freeze
-  GC_METRICS_KEY_TOTAL = 'total_size_bytes'.freeze
+  # GC_METRICS_KEY_USE = 'use_size_bytes'.freeze
+  # GC_METRICS_KEY_TOTAL = 'total_size_bytes'.freeze
+  GC_METRICS_KEY_USE = :HEAP_USE_SIZE
+  GC_METRICS_KEY_TOTAL = :HEAP_TOTAL_SIZE
   def emit_gc
     prev = @last_heap_bytes_event
     @gc_stats.sample do |gc_time_f, gc_dur_ms, gc_metrics|

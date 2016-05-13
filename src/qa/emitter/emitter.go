@@ -9,14 +9,27 @@ import (
 )
 
 type Emitter interface {
+	TraceProbes() []string
 	EnumerateTests(seed int) ([]tapjio.TraceEvent, []runner.TestRunner, error)
 }
 
 type emitterStarter func(srv *server.Server, seed int, files []string) (Emitter, error)
 
+var rubyTraceProbes = []string{
+	"Kernel#require(path)",
+	"Kernel#load",
+	"ActiveRecord::ConnectionAdapters::Mysql2Adapter#execute(sql,name)",
+	"ActiveRecord::ConnectionAdapters::PostgresSQLAdapter#execute_and_clear(sql,name,binds)",
+	"ActiveSupport::Dependencies::Loadable#require(path)",
+	"ActiveRecord::ConnectionAdapters::QueryCache#clear_query_cache",
+	"ActiveRecord::ConnectionAdapters::SchemaCache#initialize",
+	"ActiveRecord::ConnectionAdapters::SchemaCache#clear!",
+	"ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!",
+}
+
 var starters = map[string]emitterStarter{
 	"rspec": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, srv)
+		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
 		rspec.SquashPolicy(ruby.SquashByFile)
 		err := rspec.Start(files)
 		if err != nil {
@@ -26,7 +39,7 @@ var starters = map[string]emitterStarter{
 		return rspec, nil
 	},
 	"rspec-squashall": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, srv)
+		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
 		err := rspec.Start(files)
 		rspec.SquashPolicy(ruby.SquashAll)
 		if err != nil {
@@ -36,7 +49,7 @@ var starters = map[string]emitterStarter{
 		return rspec, nil
 	},
 	"rspec-pendantic": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, srv)
+		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
 		err := rspec.Start(files)
 		rspec.SquashPolicy(ruby.SquashNothing)
 		if err != nil {

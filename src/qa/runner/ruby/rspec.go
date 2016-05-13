@@ -1,6 +1,7 @@
 package ruby
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,15 +24,17 @@ type rspecContext struct {
 	requestCh    chan interface{}
 	seed         int
 	server       *server.Server
+	traceProbes  []string
 	process      *os.Process
 	squashPolicy SquashPolicy
 }
 
-func NewRspecContext(seed int, server *server.Server) *rspecContext {
+func NewRspecContext(seed int, traceProbes []string, server *server.Server) *rspecContext {
 	return &rspecContext{
 		requestCh: make(chan interface{}),
 		seed:      seed,
 		server:    server,
+		traceProbes: traceProbes,
 	}
 }
 
@@ -40,7 +43,6 @@ func (self *rspecContext) SquashPolicy(j SquashPolicy) {
 }
 
 func (self *rspecContext) Start(files []string) error {
-	fmt.Fprintln(os.Stderr, "Starting rspec context")
 	sharedData, err := assets.Asset("ruby/shared.rb")
 	if err != nil {
 		return err
@@ -53,13 +55,17 @@ func (self *rspecContext) Start(files []string) error {
 	}
 	var runnerCode = string(rspecRunnerData)
 
-	args := append([]string{
+	args := []string{
 		"-I", "lib", "-I", "spec",
 		"-e", sharedCode,
 		"-e", runnerCode,
 		"--",
 		self.server.ExposeChannel(self.requestCh),
-	}, files...)
+	}
+	for _, traceProbe := range self.traceProbes {
+		args = append(args, "--trace-probe", traceProbe)
+	}
+	args = append(args, files...)
 	cmd := exec.Command("ruby", args...)
 
 	cmd.Stderr = os.Stderr
@@ -70,7 +76,6 @@ func (self *rspecContext) Start(files []string) error {
 	}
 
 	self.process = cmd.Process
-	fmt.Fprintln(os.Stderr, "Started rspec context", self.process)
 	return nil
 }
 
@@ -87,6 +92,11 @@ func (self *rspecContext) Close() (err error) {
 	}
 
 	return
+}
+
+
+func (self *rspecContext) TraceProbes() []string {
+	return self.traceProbes
 }
 
 func (self *rspecContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
@@ -108,7 +118,7 @@ func (self *rspecContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEv
 				}
 				currentRunner = &rspecRunner{
 					context: self,
-					file:    test.File,
+					file: test.File,
 					filters: []string{},
 					seed:    seed,
 				}
@@ -160,9 +170,50 @@ func (self rspecRunner) TestCount() int {
 	return len(self.filters)
 }
 
+func debitFilter(filters []string, filter string) ([]string, error) {
+	for i, f := range filters {
+		if filter == f {
+			return append(filters[:i], filters[i+1:]...), nil
+		}
+	}
+
+	return filters, errors.New(
+		fmt.Sprintf("Unexpected test filter: %s. Expected one of %v", filter, filters))
+}
+
 func (self rspecRunner) Run(env map[string]string, callbacks tapjio.DecodingCallbacks) error {
+	var allowedBeginFilters, allowedFinishFilters []string
+	allowedBeginFilters = append(allowedBeginFilters, self.filters...)
+	allowedFinishFilters = append(allowedFinishFilters, self.filters...)
 	var wg sync.WaitGroup
 	wg.Add(1)
+	onTestBegin := callbacks.OnTestBegin
+	callbacks.OnTestBegin = func(event tapjio.TestStartedEvent) error {
+		var err error
+		allowedBeginFilters, err = debitFilter(allowedBeginFilters, event.Filter)
+		if err != nil {
+			return err
+		}
+
+		if onTestBegin == nil {
+			return nil
+		}
+		return onTestBegin(event)
+	}
+	onTest := callbacks.OnTest
+	callbacks.OnTest = func(event tapjio.TestEvent) error {
+		var err error
+		allowedFinishFilters, err = debitFilter(allowedFinishFilters, event.Filter)
+		if err != nil {
+			return err
+		}
+
+		if onTest == nil {
+			return nil
+		}
+		return onTest(event)
+	}
+
 	onFinal := callbacks.OnFinal
 	callbacks.OnFinal = func(final tapjio.FinalEvent) error {
 		if onFinal == nil {

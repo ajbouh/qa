@@ -1,11 +1,21 @@
 ENV['CPUPROFILE_FREQUENCY'] = '51'
+
+$__qa_stderr = $stderr.dup
+
+trace_probes = []
+while trace_probe_ix = ARGV.index('--trace-probe')
+  ARGV.delete_at(trace_probe_ix)
+  trace_probes.push(ARGV.delete_at(trace_probe_ix))
+end
+
 require 'thread'
 
 trace_events = []
-$__qa_trace = ::Qa::Trace.new(Process.pid) { |e| trace_events.push(e) }
-$__qa_trace.start
+qa_trace = ::Qa::Trace.new(Process.pid) { |e| trace_events.push(e) }
+trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
+qa_trace.start
 
-$__qa_trace.emit_dur('require rspec') do
+qa_trace.emit_dur('require rspec') do
   require 'rspec/core'
   require 'rspec/core/formatters/base_formatter'
 end
@@ -105,8 +115,15 @@ module RSpec
     def example_started(notification)
       @start_time = ::Qa::Time.now_f
       @trace.emit_begin('rspec it', 'ts' => @start_time * 1e6)
-      #
-      # emit example_base(notification, 'begin')
+
+      example = notification.example
+      emit(
+          'type' => 'note',
+          'qa:type' => 'test:begin',
+          'qa:timestamp' => @start_time,
+          'qa:label' => "#{example.description}",
+          'qa:subtype' => 'it',
+          'qa:filter' => example.object_id.to_s)
 
       reset_output
     end
@@ -124,7 +141,7 @@ module RSpec
         'type'     => 'test',
         'subtype'  => 'it',
         'status'   => status,
-        'filter'   => example.location,
+        'filter'   => example.object_id.to_s,
         'label'    => "#{example.description}",
         'file'     => file,
         'line'     => line,
@@ -241,47 +258,39 @@ module RSpec
       output.flush
     end
 
+    def start_read_thread_pipe_replacing(io)
+      tempfile = Tempfile.new('stdio')
+
+      io.reopen(tempfile.path)
+      return tempfile
+    end
+
+    def drain_read_thread_pipe(wr, tempfile)
+      wr.flush
+      tempfile.read
+    ensure
+      tempfile.close!
+    end
+
     #
     def reset_output
-      # @_oldout = $stdout
-      # @_olderr = $stderr
-      #
-      # @_newout = StringIO.new
-      # @_newerr = StringIO.new
-      #
-      # $stdout = @_newout
-      # $stderr = @_newerr
+      @_newout_f = start_read_thread_pipe_replacing($stdout)
+      @_newerr_f = start_read_thread_pipe_replacing($stderr)
     end
 
     #
     def captured_output
-      # return unless (@_newout && @_newerr)
-      #
-      # stdout = @_newout.string.chomp("\n")
-      # stderr = @_newerr.string.chomp("\n")
-
       doc = {}
-      # doc['stdout'] = stdout unless stdout.empty?
-      # doc['stderr'] = stderr unless stderr.empty?
-      #
-      # $stdout = @_oldout
-      # $stderr = @_olderr
+
+      return doc unless (@_newout_f && @_newerr_f)
+
+      stdout = drain_read_thread_pipe($stdout, @_newout_f).chomp("\n")
+      stderr = drain_read_thread_pipe($stderr, @_newerr_f).chomp("\n")
+
+      doc['stdout'] = stdout unless stdout.empty?
+      doc['stderr'] = stderr unless stderr.empty?
 
       return doc
-    end
-
-    #
-    def capture_io
-      # ostdout, ostderr = $stdout, $stderr
-      # cstdout, cstderr = StringIO.new, StringIO.new
-      # $stdout, $stderr = cstdout, cstderr
-
-      yield
-
-      # return cstdout.string.chomp("\n"), cstderr.string.chomp("\n")
-    ensure
-      # $stdout = ostdout
-      # $stderr = ostderr
     end
 
     #
@@ -338,30 +347,27 @@ module Client
   end
 end
 
-$stdout.reopen($stderr)
-
 socket = nil
-$__qa_trace.emit_dur('connect to socket') do
+qa_trace.emit_dur('connect to socket') do
   socket = Client.connect(ARGV.shift)
 end
 
-class Thread
-  class << self
-    alias :__qa_original_new :new
-    def new(&b)
-      $__qa_trace.emit_dur('Thread.new', 'backtrace' => caller) do |h|
-        thr = __qa_original_new(&b)
-        h['spawnedTid'] = thr.object_id
-        thr
-      end
-    end
-
-    alias :start :new
-  end
-end
+# class Thread
+#   class << self
+#     alias :__qa_original_new :new
+#     def new(&b)
+#       $__qa_trace.emit_dur('Thread.new', 'backtrace' => caller) do |h|
+#         thr = __qa_original_new(&b)
+#         h['spawnedTid'] = thr.object_id
+#         thr
+#       end
+#     end
+#
+#     alias :start :new
+#   end
+# end
 
 require 'rails_helper'
-# require 'active_record/connection_adapters/mysql2_adapter'
 require 'erb'
 
 ARGV.each { |arg| load arg }
@@ -378,7 +384,6 @@ module X
         # next unless m.autoload?(c)
 
         begin
-          $stderr.puts "Loading #{c} from #{m}"
           val = m.const_get(c)
           next unless (val.is_a?(Module) || val.is_a?(Class)) && !visited.member?(val)
           soon.push(val)
@@ -474,7 +479,7 @@ $qa_warmup_active_record = lambda do
     # Enumerating columns populates schema caches for the existing connection.
     ActiveRecord::Base.descendants.each do |model|
       # next if model.abstract_class? || !model.table_exists?
-      $__qa_trace.emit_dur('ActiveRecord::Base.descendants columns', 'name' => model.name) do
+      qa_trace.emit_dur('ActiveRecord::Base.descendants columns', 'name' => model.name) do
         begin
           model.columns
         rescue ActiveRecord::StatementInvalid
@@ -486,7 +491,7 @@ $qa_warmup_active_record = lambda do
     # Eagerly define_attribute_methods on all known models
     ActiveRecord::Base.descendants.each do |model|
       # next if !model.table_exists?
-      $__qa_trace.emit_dur('ActiveRecord::Base.descendants define_attribute_methods', 'name' => model.name) do
+      qa_trace.emit_dur('ActiveRecord::Base.descendants define_attribute_methods', 'name' => model.name) do
         begin
           model.define_attribute_methods
         rescue ActiveRecord::StatementInvalid
@@ -555,6 +560,14 @@ class TapjConduit
 end
 
 groups = RSpec.world.ordered_example_groups
+groups.each do |group|
+  group.descendants.each do |g|
+    g.examples.each do |example|
+      example.metadata[:object_id] = example.object_id.to_s
+    end
+  end
+end
+
 RSpec.clear_examples
 
 world = ::RSpec.world
@@ -588,15 +601,13 @@ else
     end
 
     spec = Rails.application.config.database_configuration[Rails.env]
-    $stderr.puts "spec #{spec}"
+    $stderr.puts "Warming up spec #{spec}"
     env.keys.zip(saved).each do |(k, v)|
       ENV[k] = v
     end
 
-    $stderr.puts "Establishing connection"
     ActiveRecord::Base.establish_connection(spec)
     ActiveRecord::Base.connection_pool.with_connection do
-      $stderr.puts "Warming up"
       $qa_warmup_active_record.call
     end
     connection = ActiveRecord::Base.connection_pool.checkout
@@ -615,9 +626,6 @@ reporter = RSpec::Core::Reporter.new(config)
 loader = config.send(:formatter_loader)
 notifications = loader.send(:notifications_for, RSpec::TapjFormatter)
 
-config.error_stream = $stderr
-config.output_stream = $stdout
-
 conserved_instances = Hash[conserved_classes.map do |mod|
   [mod, ::ObjectSpace.each_object(mod).to_a]
 end]
@@ -629,7 +637,7 @@ GC.disable
 GC.enable
 3.times { GC.start }
 
-$__qa_trace.emit_final_stats
+qa_trace.emit_final_stats
 
 socket.each_line do |line|
   p = Process.fork do
@@ -644,29 +652,30 @@ socket.each_line do |line|
       args.delete_at(seed_ix)
       seed = args.delete_at(seed_ix)
     end
-    tapj_conduit = TapjConduit.new(tapj_sink ? Client.connect(tapj_sink) : $stdout.dup)
+    tapj_conduit = TapjConduit.new(Client.connect(tapj_sink))
 
     trace_events.each do |e|
       tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
     end
 
-    $__qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
+    qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
       tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
     end
-    $__qa_trace.start
+    trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
+    qa_trace.start
 
     env.each do |k, v|
       ENV[k] = v
     end
 
-    formatter = ::RSpec::TapjFormatter.new($__qa_trace, tapj_conduit)
+    formatter = ::RSpec::TapjFormatter.new(qa_trace, tapj_conduit)
     reporter.register_listener(formatter, *notifications)
 
     if args.delete('--dry-run')
       config.dry_run = true
     else
       if defined?(ActiveRecord::Base)
-        $__qa_trace.emit_dur('ActiveRecord establish_connection') do
+        qa_trace.emit_dur('ActiveRecord establish_connection') do
           if connections_by_spec
             spec = Rails.application.config.database_configuration[Rails.env]
             connection = connections_by_spec[spec]
@@ -686,7 +695,7 @@ socket.each_line do |line|
         end
       end
 
-      world.filter_manager.include(:location => lambda { |v| args.include?(v) })
+      world.filter_manager.include(:object_id => lambda { |v| args.include?(v) })
     end
 
     reporter.report(world.example_count(groups)) do |reporter|

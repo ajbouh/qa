@@ -42,7 +42,7 @@ func Main(args []string) int {
 	auditDir := flags.String("audit-dir", "", "Directory to save TAP-J, JSON, SVG")
 	saveTapj := flags.String("save-tapj", "results.tapj", "Path to save TAP-J")
 	saveTrace := flags.String("save-trace", "trace.json", "Path to save trace JSON")
-	saveStacktraces := flags.String("save-stacktraces", "stacktraces.txt", "Path to save stacktraces.txt")
+	saveStacktraces := flags.String("save-stacktraces", "", "Path to save stacktraces.txt")
 	saveFlamegraph := flags.String("save-flamegraph", "flamegraph.svg", "Path to save flamegraph SVG")
 	saveIcegraph := flags.String("save-icegraph", "icegraph.svg", "Path to save icegraph SVG")
 	savePalette := flags.String("save-palette", "palette.map", "Path to save (flame|ice)graph palette")
@@ -72,7 +72,7 @@ func Main(args []string) int {
 	case "tapj":
 		visitors = append(visitors, tapjio.NewTapjEmitter(os.Stdout))
 	case "pretty":
-		visitors = append(visitors, &reporting.Pretty{Writer: os.Stdout, Jobs: *jobs})
+		visitors = append(visitors, reporting.NewPretty(os.Stdout, *jobs))
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown format", *format)
 		return 254
@@ -192,7 +192,7 @@ func Main(args []string) int {
 	go func(c chan os.Signal) {
 		// Wait for signal
 		sig := <-c
-		fmt.Fprintln(os.Stderr, "Got signal: ", sig)
+		fmt.Fprintln(os.Stderr, "Got signal:", sig)
 		srv.Close()
 		os.Exit(1)
 	}(sigc)
@@ -227,7 +227,6 @@ func Main(args []string) int {
 
 		em, err := emitter.Resolve(runnerName, srv, seed, files)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Starting rspec context.", err)
 			return 1
 		}
 
@@ -248,11 +247,9 @@ func Main(args []string) int {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Creating NewTestSuiteRunner")
 	suite := suite.NewTestSuiteRunner(seed, srv, allRunners)
 
 	var final tapjio.FinalEvent
-	fmt.Fprintln(os.Stderr, "Running NewTestSuiteRunner")
 
 	final, err = suite.Run(*jobs, visitor)
 	if err != nil {

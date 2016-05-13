@@ -62,7 +62,7 @@ func testRunner(t *testing.T, baseDir string) {
 		expect := tapj.FinalEvent{
 			Type:   fe.Type,
 			Time:   fe.Time,
-			Counts: tapj.FinalCounts{Total: 6, Pass: 6},
+			Counts: tapj.ResultTally{Total: 6, Pass: 6},
 		}
 
 		if expect != *fe {
@@ -86,7 +86,7 @@ func testRunner(t *testing.T, baseDir string) {
 		expect := tapj.FinalEvent{
 			Type: fe.Type,
 			Time: fe.Time,
-			Counts: tapj.FinalCounts{
+			Counts: tapj.ResultTally{
 				Total: 12,
 				Pass:  3,
 				Fail:  3,
