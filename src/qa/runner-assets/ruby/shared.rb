@@ -1,5 +1,3 @@
-require 'base64'
-
 module Qa; end
 
 module Qa::Instrument
@@ -51,49 +49,6 @@ module Qa::Instrument
     end
 
     uninstall
-  end
-end
-
-class Qa::Stats::LinuxMemory
-  def initialize(pid)
-    @pid = pid
-    @last_sample = nil
-    @min_sample_period = 1
-  end
-
-  def sample
-    now = ::Qa::Time.now_f
-    return if @last_sample && ((now - @last_sample) < @min_sample_period)
-    @last_sample = now
-
-    h = {}
-
-    status = read_proc_file("status").scan(/(.*):[\t ]+(.*)/)
-    unless status.empty?
-      h['vm_size'] = status.find { |i| i.first == 'VmSize' }.last.split(' ').first.to_i * 1024.0
-      h['vm_rss'] = status.find { |i| i.first == 'VmRSS' }.last.split(' ').first.to_i * 1024.0
-    end
-
-    smaps = read_proc_file("smaps").scan(/(.*):[\t ]+(.*)/)
-    unless smaps.empty?
-      private_dirty = smaps.find_all { |i| i.first == 'Private_Dirty' }
-      shared_dirty = smaps.find_all { |i| i.first == 'Shared_Dirty' }
-
-      h['private_dirty_total'] = private_dirty.inject(0) { |i, pd| i + pd.last.split(' ').first.to_i } * 1024.0
-      h['shared_dirty_total'] = shared_dirty.inject(0) { |i, sc| i + sc.last.split(' ').first.to_i } * 1024.0
-    end
-
-    yield h
-  end
-
-  private
-
-  def read_proc_file(name)
-    begin
-      File.read(File.join("/proc/#{@pid}", name))
-    rescue Errno::EACCES
-      ""
-    end
   end
 end
 
@@ -196,46 +151,46 @@ end
 
 module Qa::Stats; end
 
-class Qa::Stats::Flamegraph
-  def initialize(thr)
-    @queue = Queue.new
-    @strobe = ::Qa::Strobe.start(1.0/97) do
-      b = thr.backtrace
-      if b
-        status = thr.status
-        if status != 'run'
-          b.unshift(":0:in `<#{status}>'")
-        end
-        @queue.push(b)
-      end
-    end
+class Qa::Stats::LinuxMemory
+  def initialize(pid)
+    @pid = pid
+    @last_sample = nil
+    @min_sample_period = 1
   end
 
   def sample
-    counts = Hash.new(0)
+    now = ::Qa::Time.now_f
+    return if @last_sample && ((now - @last_sample) < @min_sample_period)
+    @last_sample = now
 
-    @queue.size.times do
-      backtrace = @queue.pop
+    h = {}
 
-      last = nil
-      key = ::Qa::Backtrace.cleanup(backtrace) do |file, lineno, method|
-        if file.start_with?('rspec/')
-          next nil if last == 'rspec/...'
-          next last = 'rspec/...'
-        end
-        if file.end_with?('_spec.rb')
-          next nil if last == '.../*_spec.rb'
-          next last = '.../*_spec.rb'
-        end
-
-        last = "#{file}:#{method}:#{lineno}"
-      end
-      key.compact!
-
-      counts[key.join(';')] += 1
+    status = read_proc_file("status").scan(/(.*):[\t ]+(.*)/)
+    unless status.empty?
+      h['vm_size'] = status.find { |i| i.first == 'VmSize' }.last.split(' ').first.to_i * 1024.0
+      h['vm_rss'] = status.find { |i| i.first == 'VmRSS' }.last.split(' ').first.to_i * 1024.0
     end
 
-    yield counts unless counts.empty?
+    smaps = read_proc_file("smaps").scan(/(.*):[\t ]+(.*)/)
+    unless smaps.empty?
+      private_dirty = smaps.find_all { |i| i.first == 'Private_Dirty' }
+      shared_dirty = smaps.find_all { |i| i.first == 'Shared_Dirty' }
+
+      h['private_dirty_total'] = private_dirty.inject(0) { |i, pd| i + pd.last.split(' ').first.to_i } * 1024.0
+      h['shared_dirty_total'] = shared_dirty.inject(0) { |i, sc| i + sc.last.split(' ').first.to_i } * 1024.0
+    end
+
+    yield h
+  end
+
+  private
+
+  def read_proc_file(name)
+    begin
+      File.read(File.join("/proc/#{@pid}", name))
+    rescue Errno::EACCES, Errno::ENOENT
+      ""
+    end
   end
 end
 
@@ -303,47 +258,6 @@ class Qa::Stats::GcStats
   end
 end
 
-class Qa::Stats::GcRuby19
-  def initialize
-    @start_f = ::Qa::Time.now_f
-    GC::Profiler.enable
-  end
-
-  def sample
-    # HACK(adamb) Would prefer to use GC::Profiler.raw_data in ruby 2.1.0
-    gc_result_text = GC::Profiler.result
-
-    # event = base_event('GarbageCollection')
-    if gc_result_text
-      GC::Profiler.clear
-      parse_gc_result_text(gc_result_text).each do |gc|
-        @last_gc = gc
-        yield(gc.delete('invoke_time'), gc.delete('gc_duration_ms'), gc)
-      end
-    end
-
-    nil
-  end
-
-  private
-
-  def parse_gc_result_text(gc_text_result)
-    gc_text_data = gc_text_result.lines.drop(2)
-    gc_text_data.map do |line|
-      index, invoke_time_s, use_size_bytes, total_size_bytes, total_object, gc_duration_ms = line.split(' ')
-
-      {
-        # 'index' => index.to_i,
-        'invoke_time' => @start_f + invoke_time_s.to_f,
-        'use_size_bytes' => use_size_bytes.to_i,
-        'total_size_bytes' => total_size_bytes.to_i,
-        'total_object' => total_object.to_i,
-        'gc_duration_ms' => gc_duration_ms.to_f
-      }
-    end
-  end
-end
-
 class Qa::Stats::Gc
   def initialize
     @start_f = ::Qa::Time.now_f
@@ -379,34 +293,14 @@ class Qa::Trace
   require 'thread'
   require 'json'
 
-  @@ruby_prof = false
-  # begin
-  #   require 'ruby-prof'
-  #   @@ruby_prof = true
-  # rescue LoadError
-  # end
-
-  @@perftools = false
-  # begin
-  #   require 'perftools'
-  #   require 'zlib'
-  #   require 'base64'
-  #   require 'tempfile'
-  #   @@perftools = true
-  # rescue LoadError
-  # end
-
   @@stackprof = false
-  # begin
-  #   # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
-  #   # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
-  #   require 'stackprof'
-  #   @@stackprof = true
-  # rescue LoadError
-  # end
-
-  @@flamgraph_polling = !(@@ruby_prof || @@perftools || @@stackprof)
-  @@flamgraph_polling = false
+  begin
+    # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
+    # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
+    require 'stackprof'
+    @@stackprof = true
+  rescue LoadError
+  end
 
   def initialize(pid, &b)
     @pid = pid
@@ -414,33 +308,13 @@ class Qa::Trace
     @cpu_stats = ::Qa::Stats::Cpu.new
     @gc_stats = ::Qa::Stats::Gc.new
     @linux_memory = ::Qa::Stats::LinuxMemory.new('self')
-
-    @perftool_pprof_file = nil
-    @flamegraph_stats = nil
-    @ruby_prof_result = nil
     @stackprof_result = nil
-
-    if @@flamgraph_polling
-      @flamegraph_stats = ::Qa::Stats::Flamegraph.new(Thread.current)
-    end
 
     @tracers = []
     @uninstall_tracers = []
   end
 
   def start
-    # @strobe = ::Qa::Strobe.new(0.25) do
-    #   emit_stats
-    # end
-
-    RubyProf.start if @@ruby_prof
-
-    if @@perftools
-      @perftool_pprof_file = Tempfile.new('pprof')
-      @perftool_pprof_file.close
-      PerfTools::CpuProfiler.start(@perftool_pprof_file.path)
-    end
-
     if @@stackprof
       StackProf.start(mode: :wall, raw: true)
     end
@@ -467,14 +341,10 @@ class Qa::Trace
   end
 
   def stop
-    # @strobe.stop
-    @ruby_prof_result = RubyProf.stop if @@ruby_prof
     if @@stackprof
       StackProf.stop
       @stackprof_result = StackProf.results
     end
-
-    PerfTools::CpuProfiler.stop if @@perftools
 
     @uninstall_tracers.each(&:call)
     @uninstall_tracers.clear
@@ -554,22 +424,8 @@ class Qa::Trace
       emit(@last_heap_bytes_event.merge(TS => self.ts))
     end
 
-    if @ruby_prof_result
-      emit_ruby_prof_result(@ruby_prof_result)
-    end
-
     if @stackprof_result
       emit_stackprof_result3(@stackprof_result)
-    end
-
-    if @perftool_pprof_file
-      pprof_path = @perftool_pprof_file.path
-      symbols_path = "#{pprof_path}.symbols"
-
-      emit_pprof_file(pprof_path, symbols_path)
-      @perftool_pprof_file.unlink
-      File.unlink(symbols_path)
-      @perftool_pprof_file = nil
     end
   end
 
@@ -577,7 +433,6 @@ class Qa::Trace
     emit_cpu
     emit_gc
     emit_threads
-    emit_flamegraph
     emit_shared_memory
 
     nil
@@ -590,37 +445,6 @@ class Qa::Trace
     Thread.main == c ? 1 : c.object_id
   end
 
-  def gz_base64(path)
-    sio = StringIO.new
-    gzw = Zlib::GzipWriter.new(sio)
-    gzw.mtime = 0
-    gzw << File.read(path)
-    gzw.close
-    Base64.strict_encode64(sio.string)
-  end
-
-  PPROF_METRIC_NAME = 'pprof data'.freeze
-  def emit_pprof_file(pprof_path, symbols_path)
-    now = self.ts
-
-    args = {
-      'pprofGzBase64' => gz_base64(pprof_path),
-      'symbolsGzBase64' => gz_base64(symbols_path),
-    }
-
-    dur = (::Qa::Time.now_f * 1e6) - now
-
-    emit(
-        NAME => PPROF_METRIC_NAME,
-        PID => @pid,
-        TID => tid,
-        PH => PH_X,
-        TS => now,
-        DUR => dur,
-        ARGS => args)
-  end
-
-  FLAMEGRAPH_METRIC_NAME = 'flamegraph sample'.freeze
   FLAMEGRAPH_METRIC_NAME_V2 = 'flamegraph sample v2'.freeze
   RSPEC_PREFIX = 'RSpec::'.freeze
   RSPEC_ELLIPSIS = 'RSpec::...'.freeze
@@ -687,90 +511,6 @@ class Qa::Trace
         })
   end
 
-  def emit_stackprof_result2(result)
-    raw = result[:raw]
-
-    functions = Hash.new { |h, k| h[k] = h.size }
-    counts = []
-
-    rspec_ellipsis_ix = functions[RSPEC_ELLIPSIS]
-
-    i = 0
-    while len = raw[i]
-      i += 1
-      key = []
-      len.times do
-        a = raw[i]
-        i += 1
-
-        full_name = result[:frames][a][:name]
-        next if full_name.start_with?(BLOCK_PREFIX)
-
-        if full_name.start_with?(RSPEC_PREFIX)
-          next if key[-1] == rspec_ellipsis_ix
-          full_name = RSPEC_ELLIPSIS
-        end
-
-        key << functions[full_name]
-      end
-      weight = raw[i]
-      i += 1
-
-      counts.push([key, weight])
-    end
-
-    emit(
-        NAME => FLAMEGRAPH_METRIC_NAME_V2,
-        PID => @pid,
-        TID => tid,
-        PH => PH_I,
-        TS => self.ts,
-        ARGS => {
-          'functions' => functions.keys,
-          'samples' => counts,
-        })
-  end
-
-  def emit_stackprof_result(result)
-    raw = result[:raw]
-
-    counts = []
-    i = 0
-    while len = raw[i]
-      i += 1
-      key = ''
-      len.times do
-        a = raw[i]
-        i += 1
-
-        full_name = result[:frames][a][:name]
-        next if full_name.start_with?(BLOCK_PREFIX)
-
-        if full_name.start_with?(RSPEC_PREFIX)
-          next if key.end_with?(RSPEC_ELLIPSIS)
-          full_name = RSPEC_ELLIPSIS
-        end
-
-        key << STACKTRACE_SEPARATOR unless key.empty?
-        key << full_name
-      end
-      weight = raw[i]
-      i += 1
-
-      counts.push([key, weight])
-    end
-
-    emit(
-        NAME => FLAMEGRAPH_METRIC_NAME,
-        PID => @pid,
-        TID => tid,
-        PH => PH_I,
-        TS => self.ts,
-        ARGS => {
-          ARGS_DATA => counts,
-        })
-  end
-
   def emit_shared_memory
     @linux_memory.sample do |shared_memory|
       time_f = ::Qa::Time.now_f
@@ -795,77 +535,6 @@ class Qa::Trace
           ARGS => {
             'shared_dirty_total' => shared_memory['shared_dirty_total'],
             'private_dirty_total' => shared_memory['private_dirty_total'],
-          })
-    end
-  end
-
-  def emit_ruby_prof_result(result)
-    # overall_threads_time = result.threads.reduce(0) { |a, thread| a + thread.total_time }
-    result.threads.each do |thread|
-      current_thread_id = thread.fiber_id
-      overall_time = thread.total_time
-
-      print_stack = proc do |counts, prefix, call_info|
-        total_time = call_info.total_time
-        percent_total = (total_time/overall_time)*100
-        next unless percent_total > 0
-        next unless total_time >= 0.01
-
-        kids = call_info.children
-        method = call_info.target
-        full_name = method.full_name.to_s
-        if full_name.start_with?('RSpec::') || full_name.start_with?('(Class::RSpec::')
-          full_name = 'RSpec::...'
-          if prefix.end_with?('RSpec::...')
-            current = prefix
-          else
-            current = prefix.empty? ? full_name : "#{prefix};#{full_name}"
-          end
-        else
-          current = prefix.empty? ? full_name : "#{prefix};#{full_name}"
-        end
-        counts.push([current,call_info.self_time * 1e3])
-
-        kids.each do |child|
-          print_stack.call(counts, current, child)
-        end
-      end
-
-      start = ""
-      # start << "Thread:#{thread.id}"
-      # start << "Fiber:#{thread.fiber_id}" unless thread.id == thread.fiber_id
-      thread.methods.each do |m|
-        next unless m.root?
-        m.call_infos.each do |ci|
-          next unless ci.root?
-          counts = []
-          print_stack.call(counts, start, ci)
-
-          emit(
-              NAME => FLAMEGRAPH_METRIC_NAME,
-              PID => @pid,
-              TID => 1,
-              PH => PH_I,
-              TS => self.ts,
-              ARGS => {
-                ARGS_DATA => counts,
-              })
-        end
-      end
-    end
-  end
-
-  def emit_flamegraph
-    return unless @flamegraph_stats
-    @flamegraph_stats.sample do |counts|
-      emit(
-          NAME => FLAMEGRAPH_METRIC_NAME,
-          PID => @pid,
-          TID => 1,
-          PH => PH_I,
-          TS => self.ts,
-          ARGS => {
-            ARGS_DATA => counts,
           })
     end
   end
@@ -922,8 +591,6 @@ class Qa::Trace
   GC_HEAP_METRIC_NAME = 'heap bytes'.freeze
   ARGS_USED_SIZE_BYTES = 'used_size_bytes'.freeze
   ARGS_FREE_SIZE_BYTES = 'free_size_bytes'.freeze
-  # GC_METRICS_KEY_USE = 'use_size_bytes'.freeze
-  # GC_METRICS_KEY_TOTAL = 'total_size_bytes'.freeze
   GC_METRICS_KEY_USE = :HEAP_USE_SIZE
   GC_METRICS_KEY_TOTAL = :HEAP_TOTAL_SIZE
   def emit_gc
@@ -956,6 +623,44 @@ class Qa::Trace
       emit(@last_heap_bytes_event)
     end
   end
+end
+
+require 'tempfile'
+class Qa::Stdcom
+  def reset!
+    @out_f = stdio_tempfile($stdout)
+    @err_f = stdio_tempfile($stderr)
+  end
+
+  #
+  def drain!(doc)
+    return doc unless (@out_f && @err_f)
+
+    stdout = drain_tempfile($stdout, @out_f).chomp("\n")
+    stderr = drain_tempfile($stderr, @err_f).chomp("\n")
+
+    doc['stdout'] = stdout unless stdout.empty?
+    doc['stderr'] = stderr unless stderr.empty?
+  end
+
+  private
+
+  def stdio_tempfile(io)
+    tempfile = Tempfile.new('stdio')
+
+    io.reopen(tempfile.path)
+    return tempfile
+  end
+
+  def drain_tempfile(wr, tempfile)
+    wr.flush
+    tempfile.read
+  ensure
+    tempfile.close!
+  end
+
+  #
+
 end
 
 module Qa::TapjExceptions
@@ -1054,5 +759,400 @@ module Qa::TapjExceptions
     file, line = last_before_assertion.sub(/:in .*$/, '').split(':')
     line = line.to_i if line
     return file, line
+  end
+end
+
+class ::Qa::TapjConduit
+  def initialize(io)
+    @io = io
+    @mutex = Mutex.new
+    @buffer = []
+  end
+
+  def emit(doc)
+    @mutex.synchronize do
+      @buffer.push(doc)
+    end
+  end
+
+  def flush
+    @mutex.synchronize do
+      @buffer.each do |doc|
+        s = ::Qa::Json.fast_generate(doc, :max_nesting => false)
+        s << "\n"
+        @io.write s
+      end
+      @io.flush
+      @buffer.clear
+    end
+  end
+end
+
+module ::Qa::ClientSocket
+  module_function
+
+  require 'socket'
+  def connect(address)
+    if /^(.*)@([^:]+):(\d+)$/ =~ address
+      token, ip, port = $1, $2, $3
+      socket = TCPSocket.new(ip, port)
+      socket.puts token
+      socket.flush
+      socket
+    elsif /^(.*)@([^:]+)$/ =~ address
+      token, unix = $1, $2, $3
+      socket = UNIXSocket.new(unix)
+      socket.puts token
+      socket.flush
+      socket
+    else
+      abort("Malformed address: #{address}")
+    end
+  end
+end
+
+module ::Qa::Warmup; end
+
+module ::Qa::Warmup::Autoload
+  module_function
+
+  def warmup
+    if defined?(Rails)
+      # Do this earlier, so we can avoid lazy requires and things like
+      # ActiveRecord::Base.descendants is fully populated.
+      Rails.application.eager_load!
+
+      # Eager load this (it does an internal require)
+      Rails.backtrace_cleaner
+
+      # Eager load application routes.
+      Rails.application.routes.routes
+    end
+
+    if defined?(Rack)
+      load_constants_recursively(Rack)
+    end
+
+    if defined?(I18n)
+      I18n.fallbacks[I18n.locale] if I18n.respond_to? :fallbacks
+      I18n.default_locale
+    end
+
+    if defined?(Fabricate)
+      load_constants_recursively(Fabricate)
+    end
+
+    if defined?(Fabrication)
+      load_constants_recursively(Fabrication)
+    end
+
+    if defined?(Mail)
+      Mail.eager_autoload!
+    end
+
+    if defined?(ActionController)
+      require 'action_controller/metal/testing'
+    end
+  end
+
+  def load_constants_recursively(mod)
+    visited = Set.new
+    soon = [mod]
+
+    while m = soon.pop
+      visited.add(m)
+      m.constants(false).each do |c|
+        # next unless m.autoload?(c)
+
+        begin
+          val = m.const_get(c)
+          next unless (val.is_a?(Module) || val.is_a?(Class)) && !visited.member?(val)
+          soon.push(val)
+        rescue LoadError
+        end
+      end
+    end
+  end
+end
+
+require 'set'
+class ::Qa::ConservedInstancesSet
+  def initialize
+    @classes = Set.new
+  end
+
+  def add_class(c)
+    @classes.add(c)
+  end
+
+  def remember!
+    @instances = Hash[@classes.map do |mod|
+      [mod, ::ObjectSpace.each_object(mod).to_a]
+    end]
+  end
+
+  def check_conservation
+    extra_instances = {}
+    @instances.each do |mod, preexisting|
+      existing = ::ObjectSpace.each_object(mod).to_a
+      extras = existing - preexisting
+      unless extras.empty?
+        extra_instances[mod] = [extras, preexisting - extras]
+      end
+    end
+
+    unless extra_instances.empty?
+      extra_instances.each do |mod, (extras, gone)|
+        extra_ids = extras.map(&:object_id).map { |id| "0x#{id.to_s(16)}" }
+        gone_ids = gone.map(&:object_id).map { |id| "0x#{id.to_s(16)}" }
+        $stderr.puts "!!! Extra instances found of type #{mod}: #{extra_ids.join(', ')}; gone: #{gone_ids.join(', ')}"
+      end
+    end
+  end
+end
+
+module ::Qa::Warmup::RailsActiveRecord
+  module_function
+
+  def resume(connections_by_spec)
+    if defined?(ActiveRecord::Base)
+      spec = Rails.application.config.database_configuration[Rails.env]
+      connection = connections_by_spec[spec]
+      begin
+        connection.reconnect!
+      rescue PG::ConnectionBad
+        # HACK(adamb) For some reason we need to use the private connect method, as there's busted
+        #    state inside of the ActiveRecord Postgres connection.
+        connection.send(:connect)
+      end
+
+      ActiveRecord::Base.connection_pool.checkin(connection)
+    end
+  end
+
+  def warmup_envs(envs)
+    connections_by_spec = {}
+    return connections_by_spec unless defined?(Rails) && defined?(ActiveRecord::Base)
+
+    envs.each do |env|
+      saved = ENV.to_hash.values_at(env.keys)
+      env.each do |k, v|
+        ENV[k] = v
+      end
+
+      spec = Rails.application.config.database_configuration[Rails.env]
+      $stderr.puts "Warming up spec #{spec}"
+      env.keys.zip(saved).each do |(k, v)|
+        ENV[k] = v
+      end
+
+      ActiveRecord::Base.establish_connection(spec)
+      ActiveRecord::Base.connection_pool.with_connection do
+        warmup_connection
+      end
+      connection = ActiveRecord::Base.connection_pool.checkout
+      connection.disconnect!
+
+      connections_by_spec[spec] = connection
+    end
+
+    connections_by_spec
+  end
+
+  def warmup_connection
+    if defined?(ActiveRecord::Base)
+      # Enumerating columns populates schema caches for the existing connection.
+      ActiveRecord::Base.descendants.each do |model|
+        begin
+          model.columns
+        rescue ActiveRecord::StatementInvalid
+          nil
+        end
+      end
+
+      # Eagerly define_attribute_methods on all known models
+      ActiveRecord::Base.descendants.each do |model|
+        begin
+          model.define_attribute_methods
+        rescue ActiveRecord::StatementInvalid
+          nil
+        end
+      end
+    end
+
+    if defined?(Fabrication)
+      Fabrication.manager.schematics.each_value do |schematic|
+        schematic.send(:klass)
+      end
+    end
+
+    if defined?(FactoryGirl)
+      # FactoryGirl.factories.each do |factory|
+      #   factory.compile
+      #   factory.associations
+      # end
+
+      FactoryGirl.factories.each do |factory|
+        begin
+          # Doing this enumerates all necesary classes, etc.
+          m = FactoryGirl.build_stubbed(factory.name)
+          # Trying to force more eager loading...
+          # m.class.reflections.each do |r, v|
+          #   if v.is_a?(ActiveRecord::Reflection::ThroughReflection)
+          #     $stderr.puts "skipping #{m}.#{r} #{v}"
+          #     next
+          #   end
+          #   $stderr.puts "trying #{m}.#{r} #{v}"
+          #   m.send(r)
+          # end
+        rescue
+          $stderr.puts([$!, *$@].join("\n\t"))
+        end
+      end
+    end
+  end
+end
+
+class ::Qa::OptionParser
+  attr_reader :dry_run
+  attr_reader :trace_probes
+  attr_reader :seed
+  attr_reader :tapj_sink
+
+  def initialize
+    @trace_probes = []
+    @dry_run = false
+    @seed = nil
+
+    @opt = OptionParser.new do |opts|
+      opts.on "--help", "Display this help." do
+        puts opts
+        exit
+      end
+
+      desc = "Sets random seed. Also via env. Eg: SEED=n rake"
+      opts.on "--seed SEED", Integer, desc do |m|
+        @seed = m.to_i
+      end
+
+      opts.on "--trace-probe PROBE" do |p|
+        @trace_probes.push(p)
+      end
+
+      opts.on "--dry-run" do
+        @dry_run = true
+      end
+
+      opts.on "--tapj-sink ENDPOINT" do |s|
+        @tapj_sink = s
+      end
+    end
+  end
+
+  def parse(args)
+    @opt.parse(args)
+  end
+end
+
+class ::Qa::TestEngine
+  def initialize
+    @prefork = lambda {}
+    @run_tests = lambda {}
+  end
+
+  def def_prefork(&b)
+    @prefork = b
+  end
+
+  def def_run_tests(&b)
+    @run_tests = b
+  end
+
+  def main(args)
+    trace_probes = []
+    while trace_probe_ix = args.index('--trace-probe')
+      args.delete_at(trace_probe_ix)
+      trace_probes.push(args.delete_at(trace_probe_ix))
+    end
+
+    trace_events = []
+    qa_trace = ::Qa::Trace.new(Process.pid) { |e| trace_events.push(e) }
+    trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
+    qa_trace.start
+
+    socket = ::Qa::ClientSocket.connect(args.shift)
+
+    # HACK(adamb) This needs to be an argument, somehow. It's poor form to try to do this like this.
+    begin
+      require 'rails_helper'
+    rescue LoadError
+    end
+
+    @prefork.call(args)
+
+    ::Qa::Warmup::Autoload.warmup
+
+    conserved = ::Qa::ConservedInstancesSet.new
+    if defined?(ActiveRecord::ConnectionAdapters::SchemaCache)
+      conserved.add_class(ActiveRecord::ConnectionAdapters::SchemaCache)
+    end
+
+    # TODO(adamb) Update the below to properly initialize caches for all possible envs
+    envs = [
+      {'QA_WORKER' => nil},
+      {'QA_WORKER' => '1'},
+      # {'QA_WORKER' => '2'},
+    ]
+    connections_by_spec = ::Qa::Warmup::RailsActiveRecord.warmup_envs(envs)
+
+    conserved.remember!
+
+    # Get a clean GC state, marking remaining objects as old in ruby 2.2
+    GC.disable
+    GC.enable
+    3.times { GC.start }
+
+    qa_trace.emit_final_stats
+
+    socket.each_line do |line|
+      env, args = JSON.parse(line)
+
+      accept_client(connections_by_spec, env, args, conserved, trace_probes, trace_events)
+
+      # Only pass trace_events along to the first client.
+      trace_events.clear
+    end
+  end
+
+  def accept_client(connections_by_spec, env, args, conserved, trace_probes, trace_events)
+    p = Process.fork do
+      opt = ::Qa::OptionParser.new
+      tests = opt.parse(args)
+
+      seed = opt.seed
+      tapj_conduit = ::Qa::TapjConduit.new(::Qa::ClientSocket.connect(opt.tapj_sink))
+
+      trace_events.each do |e|
+        tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
+      end
+
+      qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
+        tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
+      end
+      trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
+      qa_trace.start
+
+      env.each do |k, v|
+        ENV[k] = v
+      end
+
+      @run_tests.call(qa_trace, opt, connections_by_spec, tapj_conduit, tests)
+
+      conserved.check_conservation
+
+      tapj_conduit.flush
+      exit!
+    end
+    Process.detach(p)
   end
 end

@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"sort"
 	"qa/tapjio"
 )
 
@@ -68,6 +69,8 @@ func (self *TimeCop) SuiteFinished(final tapjio.FinalEvent) {
 				self.TotalSlowPassingDuration += passingOutcome.Duration
 			}
 		}
+
+		sort.Sort(sort.Reverse(ByOutcomeDuration(self.SlowPassingOutcomes)))
 
 		if self.MaxResults >= 0 && len(self.SlowPassingOutcomes) > self.MaxResults {
 			sparedPassingOutcomes := self.SlowPassingOutcomes[self.MaxResults:]

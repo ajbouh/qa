@@ -27,37 +27,29 @@ var rubyTraceProbes = []string{
 	"ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!",
 }
 
+func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitterStarter {
+	return func(srv *server.Server, seed int, files []string) (Emitter, error) {
+		context := ruby.NewRubyContext(seed, runnerAssetName, rubyTraceProbes, srv)
+		context.SquashPolicy(policy)
+		err := context.Start(files)
+		if err != nil {
+			return nil, err
+		}
+
+		return context, nil
+	}
+}
+
 var starters = map[string]emitterStarter{
-	"rspec": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
-		rspec.SquashPolicy(ruby.SquashByFile)
-		err := rspec.Start(files)
-		if err != nil {
-			return nil, err
-		}
-
-		return rspec, nil
-	},
-	"rspec-squashall": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
-		err := rspec.Start(files)
-		rspec.SquashPolicy(ruby.SquashAll)
-		if err != nil {
-			return nil, err
-		}
-
-		return rspec, nil
-	},
-	"rspec-pendantic": func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		rspec := ruby.NewRspecContext(seed, rubyTraceProbes, srv)
-		err := rspec.Start(files)
-		rspec.SquashPolicy(ruby.SquashNothing)
-		if err != nil {
-			return nil, err
-		}
-
-		return rspec, nil
-	},
+	"rspec": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashByFile),
+	"rspec-squashall": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashAll),
+	"rspec-pendantic": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashNothing),
+	"minitest": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashByFile),
+	"minitest-squashall": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashAll),
+	"minitest-pendantic": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashNothing),
+	"test-unit": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashByFile),
+	"test-unit-squashall": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashAll),
+	"test-unit-pendantic": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashNothing),
 }
 
 func Resolve(name string, srv *server.Server, seed int, files []string) (Emitter, error) {

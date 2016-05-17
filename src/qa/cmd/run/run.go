@@ -116,12 +116,6 @@ func Main(args []string) int {
 	}
 
 	if *saveFlamegraph != "" {
-		flamegraphFile, err := os.Create(*saveFlamegraph)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer flamegraphFile.Close()
-
 		visitors = append(visitors, &tapjio.DecodingCallbacks{
 			OnFinal: func(final tapjio.FinalEvent) error {
 				titleSuffix, _ := json.Marshal(flags.Args())
@@ -132,6 +126,16 @@ func Main(args []string) int {
 				if *savePalette != "" {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
+
+				if stacktraceBytes.Len() == 0 {
+					return nil
+				}
+
+				flamegraphFile, err := os.Create(*saveFlamegraph)
+				if err != nil {
+					log.Fatal(err)
+				}
+				defer flamegraphFile.Close()
 
 				err = tapjio.GenerateFlameGraph(
 					bytes.NewReader(stacktraceBytes.Bytes()),
@@ -146,12 +150,6 @@ func Main(args []string) int {
 	}
 
 	if *saveIcegraph != "" {
-		icegraphFile, err := os.Create(*saveIcegraph)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer icegraphFile.Close()
-
 		visitors = append(visitors, &tapjio.DecodingCallbacks{
 			OnFinal: func(final tapjio.FinalEvent) error {
 				titleSuffix, _ := json.Marshal(flags.Args())
@@ -164,6 +162,16 @@ func Main(args []string) int {
 				if *savePalette != "" {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
+
+				if stacktraceBytes.Len() == 0 {
+					return nil
+				}
+
+				icegraphFile, err := os.Create(*saveIcegraph)
+				if err != nil {
+					log.Fatal(err)
+				}
+				defer icegraphFile.Close()
 
 				err = tapjio.GenerateFlameGraph(
 					bytes.NewReader(stacktraceBytes.Bytes()),
@@ -207,22 +215,27 @@ func Main(args []string) int {
 	for _, runnerSpec := range flags.Args() {
 		runnerSpecSplit := strings.SplitN(runnerSpec, ":", 2)
 		var runnerName string
-		var glob string
+		var globStr string
 		if len(runnerSpecSplit) != 2 {
 			// TODO(adamb) Should autodetect. For now assume rspec.
 			runnerName = "rspec"
-			glob = runnerSpecSplit[0]
+			globStr = runnerSpecSplit[0]
 		} else {
 			runnerName = runnerSpecSplit[0]
-			glob = runnerSpecSplit[1]
+			globStr = runnerSpecSplit[1]
 		}
 
-		files, err := zglob.Glob(glob)
-		fmt.Fprintf(os.Stderr, "Resolved %v to %v\n", glob, files)
+		var files []string
 
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Resolving glob.", err)
-			return 1
+		for _, glob := range strings.Split(globStr, ":") {
+			globFiles, err := zglob.Glob(glob)
+			fmt.Fprintf(os.Stderr, "Resolved %v to %v\n", glob, globFiles)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Resolving glob.", err)
+				return 1
+			}
+
+			files = append(files, globFiles...)
 		}
 
 		em, err := emitter.Resolve(runnerName, srv, seed, files)

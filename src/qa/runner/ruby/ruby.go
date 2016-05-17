@@ -20,40 +20,42 @@ const (
 	SquashAll
 )
 
-type rspecContext struct {
+type rubyContext struct {
 	requestCh    chan interface{}
 	seed         int
 	server       *server.Server
+  runnerAssetName string
 	traceProbes  []string
 	process      *os.Process
 	squashPolicy SquashPolicy
 }
 
-func NewRspecContext(seed int, traceProbes []string, server *server.Server) *rspecContext {
-	return &rspecContext{
+func NewRubyContext(seed int, runnerAssetName string, traceProbes []string, server *server.Server) *rubyContext {
+	return &rubyContext{
 		requestCh: make(chan interface{}),
 		seed:      seed,
+    runnerAssetName: runnerAssetName,
 		server:    server,
 		traceProbes: traceProbes,
 	}
 }
 
-func (self *rspecContext) SquashPolicy(j SquashPolicy) {
+func (self *rubyContext) SquashPolicy(j SquashPolicy) {
 	self.squashPolicy = j
 }
 
-func (self *rspecContext) Start(files []string) error {
+func (self *rubyContext) Start(files []string) error {
 	sharedData, err := assets.Asset("ruby/shared.rb")
 	if err != nil {
 		return err
 	}
 	var sharedCode = string(sharedData)
 
-	rspecRunnerData, err := assets.Asset("ruby/rspec.rb")
+	runnerData, err := assets.Asset(self.runnerAssetName)
 	if err != nil {
 		return err
 	}
-	var runnerCode = string(rspecRunnerData)
+	var runnerCode = string(runnerData)
 
 	args := []string{
 		"-I", "lib", "-I", "spec",
@@ -80,7 +82,7 @@ func (self *rspecContext) Start(files []string) error {
 }
 
 // TODO(adamb) Should also cancel all existing waitgroups
-func (self *rspecContext) Close() (err error) {
+func (self *rubyContext) Close() (err error) {
 	s := *self.server
 	if self.process != nil {
 		err = self.process.Kill()
@@ -95,15 +97,15 @@ func (self *rspecContext) Close() (err error) {
 }
 
 
-func (self *rspecContext) TraceProbes() []string {
+func (self *rubyContext) TraceProbes() []string {
 	return self.traceProbes
 }
 
-func (self *rspecContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
+func (self *rubyContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	var currentRunner *rspecRunner
+	var currentRunner *rubyRunner
 	serverAddress := self.server.Decode(&tapjio.DecodingCallbacks{
 		OnTrace: func(trace tapjio.TraceEvent) (err error) {
 			traceEvents = append(traceEvents, trace)
@@ -116,7 +118,7 @@ func (self *rspecContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEv
 				if currentRunner != nil {
 					testRunners = append(testRunners, *currentRunner)
 				}
-				currentRunner = &rspecRunner{
+				currentRunner = &rubyRunner{
 					context: self,
 					file: test.File,
 					filters: []string{},
@@ -147,11 +149,11 @@ func (self *rspecContext) EnumerateTests(seed int) (traceEvents []tapjio.TraceEv
 	return
 }
 
-func (self *rspecContext) subscribeVisitor(visitor tapjio.Visitor) string {
+func (self *rubyContext) subscribeVisitor(visitor tapjio.Visitor) string {
 	return self.server.Decode(visitor)
 }
 
-func (self *rspecContext) request(env map[string]string, args []string) {
+func (self *rubyContext) request(env map[string]string, args []string) {
 	r := []interface{}{
 		env,
 		args,
@@ -159,14 +161,14 @@ func (self *rspecContext) request(env map[string]string, args []string) {
 	self.requestCh <- r
 }
 
-type rspecRunner struct {
-	context *rspecContext
+type rubyRunner struct {
+	context *rubyContext
 	seed    int
 	file    string
 	filters []string
 }
 
-func (self rspecRunner) TestCount() int {
+func (self rubyRunner) TestCount() int {
 	return len(self.filters)
 }
 
@@ -181,7 +183,7 @@ func debitFilter(filters []string, filter string) ([]string, error) {
 		fmt.Sprintf("Unexpected test filter: %s. Expected one of %v", filter, filters))
 }
 
-func (self rspecRunner) Run(env map[string]string, callbacks tapjio.DecodingCallbacks) error {
+func (self rubyRunner) Run(env map[string]string, callbacks tapjio.DecodingCallbacks) error {
 	var allowedBeginFilters, allowedFinishFilters []string
 	allowedBeginFilters = append(allowedBeginFilters, self.filters...)
 	allowedFinishFilters = append(allowedFinishFilters, self.filters...)

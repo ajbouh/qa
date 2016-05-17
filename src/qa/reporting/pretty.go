@@ -6,7 +6,6 @@ import (
 	"qa/analysis"
 	"qa/tapjio"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -290,7 +289,6 @@ func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
 			millisDuration(self.timeCop.SlowestFastPassingDuration))
 
 		slowPassingOutcomes := self.timeCop.SlowPassingOutcomes
-		sort.Sort(sort.Reverse(analysis.ByOutcomeDuration(slowPassingOutcomes)))
 		for _, outcome := range slowPassingOutcomes {
 			fmt.Fprintf(self.writer, "🐌  %-59s %v\n",
 					self.boldYellow(outcome.Label),
