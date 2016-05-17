@@ -3,11 +3,12 @@ package run
 // cd <basedir> && qa
 
 import (
-	"bytes"
+	// "bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
+	// "io"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -96,23 +97,28 @@ func Main(args []string) int {
 		visitors = append(visitors, tapjio.NewTraceWriter(traceFile))
 	}
 
-	stacktraceWriters := []io.Writer{}
+	var stacktracesFile *os.File
 	if *saveStacktraces != "" {
-		stacktracesFile, err := os.Create(*saveStacktraces)
+		stacktracesFile, err = os.Create(*saveStacktraces)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer stacktracesFile.Close()
-		stacktraceWriters = append(stacktraceWriters, stacktracesFile)
 	}
 
-	var stacktraceBytes bytes.Buffer
 	if *saveFlamegraph != "" || *saveIcegraph != "" {
-		stacktraceWriters = append(stacktraceWriters, &stacktraceBytes)
+		if stacktracesFile == nil {
+			stacktracesFile, err = ioutil.TempFile("", "stacktrace")
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer stacktracesFile.Close()
+			defer os.Remove(stacktracesFile.Name())
+		}
 	}
 
-	if len(stacktraceWriters) > 0 {
-		visitors = append(visitors, tapjio.NewStacktraceEmitter(io.MultiWriter(stacktraceWriters...)))
+	if stacktracesFile != nil {
+		visitors = append(visitors, tapjio.NewStacktraceEmitter(stacktracesFile))
 	}
 
 	if *saveFlamegraph != "" {
@@ -127,9 +133,9 @@ func Main(args []string) int {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
 
-				if stacktraceBytes.Len() == 0 {
-					return nil
-				}
+				// if stacktraceBytes.Len() == 0 {
+				// 	return nil
+				// }
 
 				flamegraphFile, err := os.Create(*saveFlamegraph)
 				if err != nil {
@@ -137,8 +143,9 @@ func Main(args []string) int {
 				}
 				defer flamegraphFile.Close()
 
+				stacktracesFile.Seek(0, 0)
 				err = tapjio.GenerateFlameGraph(
-					bytes.NewReader(stacktraceBytes.Bytes()),
+					stacktracesFile,
 					flamegraphFile,
 					options...)
 				if err != nil {
@@ -163,9 +170,9 @@ func Main(args []string) int {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
 
-				if stacktraceBytes.Len() == 0 {
-					return nil
-				}
+				// if stacktraceBytes.Len() == 0 {
+				// 	return nil
+				// }
 
 				icegraphFile, err := os.Create(*saveIcegraph)
 				if err != nil {
@@ -173,8 +180,9 @@ func Main(args []string) int {
 				}
 				defer icegraphFile.Close()
 
+				stacktracesFile.Seek(0, 0)
 				err = tapjio.GenerateFlameGraph(
-					bytes.NewReader(stacktraceBytes.Bytes()),
+					stacktracesFile,
 					icegraphFile,
 					options...)
 				if err != nil {

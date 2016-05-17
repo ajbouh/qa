@@ -17,53 +17,89 @@ import (
 
 	"github.com/google/pprof/driver"
 	"github.com/google/pprof/profile"
+	"github.com/hashicorp/golang-lru"
 )
+
+type stacktraceWeightCache struct {
+	cache *lru.Cache
+}
+
+func newStacktraceWeightCache(size int, onEvict func(stacktraceKey string, weight int)) *stacktraceWeightCache {
+	cache, _ := lru.NewWithEvict(size, func(key interface{}, value interface{}) {
+		keyString, valueIntPtr := castKeyValue(key, value)
+		onEvict(keyString, *valueIntPtr)
+	})
+
+	return &stacktraceWeightCache{cache}
+}
+
+func castKeyValue(key interface{}, value interface{}) (string, *int) {
+	keyString, _ := key.(string)
+	weightPtr, _ := value.(*int)
+	return keyString, weightPtr
+}
+
+func (s *stacktraceWeightCache) Purge() {
+	s.cache.Purge()
+}
+
+func (s *stacktraceWeightCache) Add(key string, weight int) {
+	value, ok := s.cache.Get(key)
+	if ok {
+		_, weightPtr := castKeyValue(key, value)
+		*weightPtr = *weightPtr + weight
+	} else {
+		w := weight
+		s.cache.Add(key, &w)
+	}
+}
+
+type stacktraceWriter struct {
+	writer io.Writer
+	lastError error
+	cache *stacktraceWeightCache
+}
+
+func newStacktraceWriter(writer io.Writer) *stacktraceWriter {
+	var sw *stacktraceWriter
+	evict := func(key string, weight int) {
+		_, err := fmt.Fprintf(sw.writer, "%s %d\n", key, weight)
+		if sw.lastError != nil {
+			sw.lastError = err
+		}
+	}
+	sw = &stacktraceWriter{
+		writer: writer,
+		cache: newStacktraceWeightCache(16, evict),
+	}
+	return sw
+}
+
+func (s *stacktraceWriter) checkAndClearLastError() error {
+	if s.lastError != nil {
+		err := s.lastError
+		s.lastError = nil
+		return err
+	}
+
+	return nil
+}
+
+func (s *stacktraceWriter) Finish() error {
+	s.cache.Purge()
+	return s.checkAndClearLastError()
+}
+
+func (s *stacktraceWriter) EmitStacktrace(key string, weight int) error {
+	s.cache.Add(key, weight)
+	return s.checkAndClearLastError()
+}
+
 
 // Extracts trace events from a tapj stream.
 
 type stacktraceEmitter struct {
 	writer io.Writer
-}
-
-func decodeFlamegraphSample(writer io.Writer, bytes []byte) error {
-	traceMap := make(map[string](interface{}))
-	err := json.Unmarshal(bytes, &traceMap)
-	if err != nil {
-		return err
-	}
-
-	x, ok := traceMap["args"]
-	if !ok {
-		return nil
-	}
-
-	xMap, ok := x.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	y, ok := xMap["data"]
-	if !ok {
-		return nil
-	}
-
-	ySlice, ok := y.([](interface{}))
-	if !ok {
-		return nil
-	}
-
-	for _, z := range ySlice {
-		zSlice, ok := z.([](interface{}))
-		if !ok {
-			continue
-		}
-		backtrace := zSlice[0]
-		count := zSlice[1]
-		countN, _ := count.(float64)
-		fmt.Fprintf(writer, "%s %d\n", backtrace, int(countN))
-	}
-
-	return nil
 }
 
 type encodedProfile struct {
@@ -79,12 +115,14 @@ type encodedProfile struct {
 //     Use msgpack (if available in ruby subprocess!) to shrink data size even further?
 //     Consider defining TAP-MSGPACK (which is just TAP-J converted to msgpack)
 
-func decodeFlamegraphSampleV2(writer io.Writer, bytes []byte) error {
+func decodeFlamegraphSampleV2(writer io.Writer, b []byte) error {
 	profile := encodedProfile{}
-	err := json.Unmarshal(bytes, &profile)
+	err := json.Unmarshal(b, &profile)
 	if err != nil {
 		return err
 	}
+
+	se := newStacktraceWriter(writer)
 
 	symbolPrefixes := profile.SymbolPrefixes
 	prev := ""
@@ -104,9 +142,9 @@ func decodeFlamegraphSampleV2(writer io.Writer, bytes []byte) error {
 	i := 0
 	samples := profile.Samples
 	for i < len(samples) {
+		var buffer bytes.Buffer
 		frameLength := samples[i]
 		i++
-		first := true
 		previousSymbol := ""
 		for frameLength > 0 {
 			sample := samples[i]
@@ -124,15 +162,17 @@ func decodeFlamegraphSampleV2(writer io.Writer, bytes []byte) error {
 			}
 
 			previousSymbol = symbol
-			if first {
-				first = false
-			} else {
-				fmt.Fprintf(writer, ";")
+			if buffer.Len() > 0 {
+				buffer.WriteByte(';')
 			}
-			fmt.Fprintf(writer, "%s", symbol)
+			buffer.Write([]byte(symbol))
 		}
-		fmt.Fprintf(writer, " %d\n", samples[i])
+		se.EmitStacktrace(buffer.String(), samples[i])
 		i++
+	}
+
+	if err := se.Finish(); err != nil {
+		return err
 	}
 
 	return nil
@@ -392,15 +432,6 @@ func NewStacktraceEmitter(writer io.Writer) *stacktraceEmitter {
 
 func (t *stacktraceEmitter) TraceEvent(event TraceEvent) error {
 	data := event.Data
-
-	if data.Name == "flamegraph sample" {
-		argsBytes, err := data.Args.MarshalJSON()
-		if err != nil {
-			return err
-		}
-
-		return decodeFlamegraphSample(t.writer, argsBytes)
-	}
 
 	if data.Name == "flamegraph sample v2" {
 		argsBytes, err := data.Args.MarshalJSON()

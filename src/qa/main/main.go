@@ -5,6 +5,7 @@ import (
 	"os"
 	"qa/cmd/flamegraph"
 	"qa/cmd/run"
+	"qa/cmd/stackcollapse"
 )
 
 func main() {
@@ -15,6 +16,14 @@ func main() {
 		status = run.Main(os.Args[2:])
 	case "flamegraph":
 		err := flamegraph.Main(os.Args[2:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			status = 1
+		} else {
+			status = 0
+		}
+	case "stackcollapse":
+		err := stackcollapse.Main(os.Args[2:])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			status = 1

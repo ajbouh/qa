@@ -430,7 +430,7 @@ func UnmarshalEvent(value []byte) (err error, event interface{}) {
 			event = new(TestStartedEvent)
 		}
 	default:
-		err = errors.New("Unknown type: " + baseEvent.Type)
+		err = errors.New("Unknown type: '" + baseEvent.Type + "': " + string(value))
 		return
 	}
 
