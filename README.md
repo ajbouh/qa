@@ -8,21 +8,37 @@ That's a lofty goal. As a start, we'll keep things simple.
 
 ## What can QA help me do today?
 
-Nothing yet, because we haven't release any source code or binaries yet. :(
+1. Run your tests faster. Run `qa run <type>:<glob>` in your project directory and watch your test results scream by as they run in parallel. QA provides a beautiful, easy to understand report. No Rakefile necessary!
+
+2. See which tests are slowing down your testrun. QA highlights tests that are dramatically slower than the average test duration. Look for the 🐌 at the end of successful testrun!
+
+3. See which test-specific stderr and stdout, even when tests are run in parallel! generated it.
+
+4. Generate a flamegraph (or icicle graph) for the entire testrun, using `-save-flamegraph`, `-save-icegraph`. See also `-save-palette`.
+
+5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each test method in its own worker process. (The default is to run each test case in its own worker fork.)
+
+6. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
+
+7. If a test fails, see source code snippets and, in some cases, actual values of local variables (use option `-errors-capture-locals`, experimental and Mac OS X only) for for each entry in the stack trace.
+
+8. Record test output as TAP-J, using `-save-tapj` option.
+
+9. Special ActiveRecord integration means QA will automatically partition tests across multiple databases, one per worker. If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental.
 
 ## What languages and test frameworks does QA support?
 
-None yet. Please open an issue to request one!
+Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler.
+
+Please open an issue to request other languages and frameworks!
 
 ## What will QA help me do tomorrow?
 
-1. Run your tests faster. Just run `qa` (in your project directory) and watch your test results scream by as they run in parallel. QA auto-detects your framework and provides a beautiful, easy to understand report. No Rakefile or other boilerplate necessary.
+1. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose flaky, slow, and otherwise problematic tests.
 
-2. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose flaky, slow, and otherwise problematic tests.
+2. A faster and more focused development cycle. QA will prioritize test ordering based on what's failed recently and what files you're changing.
 
-3. A faster and more focused development cycle. QA will prioritize test ordering based on what's failed recently and what files you're changing.
-
-4. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines and stream the results back to your terminal in real time.
+3. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines and stream the results back to your terminal in real time.
 
 
 ## Getting started with QA
@@ -43,7 +59,7 @@ test/
 Example usage and output:
 ```
 > cd $project
-> qa
+> qa run minitest:test/test**.rb
 ???
 ```
 
@@ -71,10 +87,8 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 ## QA Roadmap
 
 ### Basic functionality
-- [x] Write initial binary to detect simple Ruby minitest tests
-- [x] Expand ruby test detection to rspec.
 - [x] Attaching a custom reporter to test runner
-- [ ] Use process forking to amortize cost of starting test runner
+- [x] Use process forking to amortize cost of starting test runner
 - [ ] Support for Go, Java, JavaScript, Python, PHP
 
 ### Parallelization
@@ -87,9 +101,9 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [ ] Support for additional external execution environments, like Kubernetes, Mesos
 
 ### Tracking stats / artifacts
-- [ ] Support for working with a local audit folder
+- [x] Support for working with a local audit folder
 - [ ] Support for working with a remote audit folder (e.g. S3)
-- [ ] Generate trace file
+- [x] Generate trace file
 - [ ] Generate single html file report with results, audits, flakiness statistics
 - [ ] Add integration with system monitoring agents (e.g. performance copilot)
 
