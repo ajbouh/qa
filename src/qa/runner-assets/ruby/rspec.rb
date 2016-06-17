@@ -1,7 +1,5 @@
 ENV['CPUPROFILE_FREQUENCY'] = '51'
 
-$__qa_stderr = $stderr.dup
-
 require 'thread'
 
 require 'rspec/core'
@@ -129,8 +127,6 @@ module RSpec
         'label'    => "#{example.description}",
         'file'     => file,
         'line'     => line,
-        'source'   => (::Qa::TapjExceptions.source(file)[line-1] || '').strip,
-        'snippet'  => ::Qa::TapjExceptions.code_snippet(file, line),
         'time' => time
       }
       @stdcom.drain!(doc)
@@ -281,7 +277,7 @@ engine.def_prefork do |files|
   # Trigger eager loading. Should do this automatically...
   ::Qa::Warmup::Autoload.load_constants_recursively(RSpec)
 
-  groups = RSpec.world.ordered_example_groups
+  groups = RSpec.world.ordered_example_groups.dup
   groups.each do |group|
     group.descendants.each do |g|
       g.examples.each do |example|
@@ -293,7 +289,7 @@ engine.def_prefork do |files|
   RSpec.clear_examples
 end
 
-engine.def_run_tests do |qa_trace, opt, connections_by_spec, tapj_conduit, tests|
+engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   world = ::RSpec.world
   rspec_config = RSpec.configuration
 
@@ -308,8 +304,6 @@ engine.def_run_tests do |qa_trace, opt, connections_by_spec, tapj_conduit, tests
 
   if opt.dry_run
     rspec_config.dry_run = true
-  else
-    ::Qa::Warmup::RailsActiveRecord.resume(connections_by_spec)
   end
 
   unless tests.empty?

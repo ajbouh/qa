@@ -88,7 +88,7 @@ func (self *Pretty) SuiteStarted(suite tapjio.SuiteEvent) error {
 	self.totalTests = suite.Count
 	self.seed = suite.Seed
 	self.startTime = time.Now()
-	fmt.Fprintf(self.writer, "Will run %d tests using %d %s and seed %d.\n\n",
+	fmt.Fprintf(self.writer, "Will run %d tests using %d %s and seed %d. Will hide names of passing tests lacking output.\n\n",
 		self.totalTests,
 		self.jobs,
 		maybePlural(self.jobs, "job", "jobs"),
@@ -113,9 +113,10 @@ func (self *Pretty) writeSummary() {
 	tallySummary := self.summarizeTally(*self.tally)
 	if tallySummary != "" {
 		tallySummaryPrefix = ": "
+		tallySummary = tallySummary + ", with"
 	}
 
-	fmt.Fprintf(self.writer, "\nRan %d%% in %v (%v of job time)%s%s. %d remaining, %d running:\n",
+	fmt.Fprintf(self.writer, "\nRan %d%% in %v (%v of job time)%s%s %d remaining and %d running:\n",
 		int(float64(self.tally.Total) / float64(self.totalTests) * 100.0),
 		round(time.Since(self.startTime), time.Millisecond),
 		millisDuration(self.totalTestTime),
@@ -177,20 +178,65 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 		self.tally.Total, self.totalTests,
 		millisDuration(test.Time))
 
-	if test.Exception != nil {
+	if (test.Status == tapjio.Fail || test.Status == tapjio.Error) && test.Exception != nil {
 		// fmt.Fprintf(self.writer, "%s\n\n", indent(test.Exception.Class, 3))
 		fmt.Fprintf(self.writer, "%s\n\n", indent(test.Exception.Message, 3))
-		// puts backtrace_snippets(test).indent(tabsize)
 
-		// for index, lineMap := range test.Exception.Snippet {
-		// fmt.Fprintf(self.writer, "%d:%v   %v\n", index, lineMap, test.Exception.Backtrace)
-		// backtrace := test.Exception.Backtrace[index]
-		// backtraceFile, backtraceLine := parseBacktracePosition(backtrace)
-		// fmt.Fprintf(self.writer, "%s:%d\n", backtraceFile, backtraceLine)
-		// for lineNum, lineText := range lineMap {
-		// 	fmt.Fprintf(self.writer, "%s: %s\n", lineNum, lineText)
-		// }
-		// }
+		snippets := test.Exception.Snippets
+		for _, entry := range test.Exception.Backtrace {
+			fmt.Fprintf(self.writer, "   File \"%s\", line %d\n", entry.File, entry.Line)
+			vars := entry.Variables
+			if len(vars) > 0 {
+				fmt.Fprintf(self.writer, "   Locals:\n")
+
+				maxVarNameLength := 0
+				for varName, _ := range vars {
+					l := len(varName)
+					if l > maxVarNameLength {
+						maxVarNameLength = l
+					}
+				}
+
+				format := "      %- " + strconv.Itoa(maxVarNameLength) + "s = %s\n"
+				for varName, varValue := range vars {
+					fmt.Fprintf(self.writer, format, varName, varValue)
+				}
+			}
+
+			lines, ok := snippets[entry.File]
+			if !ok {
+				continue
+			}
+
+			fmt.Fprintf(self.writer, "   Source:\n")
+			contextLines := 3
+			initialLine := entry.Line - contextLines
+			lastLine := entry.Line + contextLines
+			if initialLine < 0 {
+				initialLine = 1
+			}
+
+			for i := initialLine; i <= lastLine; i++ {
+				lineText, ok := lines[strconv.Itoa(i)]
+				if !ok {
+					continue
+				}
+				var marker string
+				format := "   %s% 3d | %s\n"
+				if i == entry.Line {
+					marker = "›"
+					format = self.boldYellow(format)
+				} else {
+					marker = " "
+				}
+				fmt.Fprintf(self.writer, format, marker, i, lineText)
+			}
+
+		}
+
+
+
+		fmt.Fprintf(self.writer, "\n")
 	}
 
 	if test.Stdout != "" {

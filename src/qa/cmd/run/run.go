@@ -39,21 +39,34 @@ func maybeJoin(p string, dir string) string {
 }
 
 func Main(args []string) int {
+	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Cur: 999999999, Max: 999999999}); err != nil {
+		log.Fatal("Could not enable core dumps: ", err)
+	}
+
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	auditDir := flags.String("audit-dir", "", "Directory to save TAP-J, JSON, SVG")
 	saveTapj := flags.String("save-tapj", "results.tapj", "Path to save TAP-J")
 	saveTrace := flags.String("save-trace", "trace.json", "Path to save trace JSON")
-	saveStacktraces := flags.String("save-stacktraces", "", "Path to save stacktraces.txt")
-	saveFlamegraph := flags.String("save-flamegraph", "flamegraph.svg", "Path to save flamegraph SVG")
-	saveIcegraph := flags.String("save-icegraph", "icegraph.svg", "Path to save icegraph SVG")
+	saveStacktraces := flags.String("save-stacktraces", "", "Path to save stacktraces.txt, implies -sample-stack")
+	saveFlamegraph := flags.String("save-flamegraph", "flamegraph.svg", "Path to save flamegraph SVG, implies -sample-stack")
+	saveIcegraph := flags.String("save-icegraph", "icegraph.svg", "Path to save icegraph SVG, implies -sample-stack")
 	savePalette := flags.String("save-palette", "palette.map", "Path to save (flame|ice)graph palette")
 	format := flags.String("format", "pretty", "Set output format")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "Set number of jobs")
+
+	errorsCaptureLocals := flags.String("errors-capture-locals", "false", "Use runtime debug API to capture locals from stack when raising errors")
+	captureStandardFds := flags.Bool("capture-standard-fds", true, "Capture stdout and stderr")
+	evalAfterFork := flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins")
+	sampleStack := flags.Bool("sample-stack", false, "Enable stack sampling")
 
 	err := flags.Parse(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+
+	if *saveStacktraces != "" || *saveFlamegraph != "" || *saveIcegraph != "" {
+		*sampleStack = true
 	}
 
 	if *auditDir != "" {
@@ -133,9 +146,14 @@ func Main(args []string) int {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
 
-				// if stacktraceBytes.Len() == 0 {
-				// 	return nil
-				// }
+				// There may be nothing to do if we didn't see any stacktrace data!
+				stacktraceFileInfo, err := stacktracesFile.Stat()
+				if err != nil {
+					return err
+				}
+				if stacktraceFileInfo.Size() == 0 {
+					return nil
+				}
 
 				flamegraphFile, err := os.Create(*saveFlamegraph)
 				if err != nil {
@@ -170,9 +188,14 @@ func Main(args []string) int {
 					options = append(options, "--cp", "--palfile=" + *savePalette)
 				}
 
-				// if stacktraceBytes.Len() == 0 {
-				// 	return nil
-				// }
+				// There may be nothing to do if we didn't see any stacktrace data!
+				stacktraceFileInfo, err := stacktracesFile.Stat()
+				if err != nil {
+					return err
+				}
+				if stacktraceFileInfo.Size() == 0 {
+					return nil
+				}
 
 				icegraphFile, err := os.Create(*saveIcegraph)
 				if err != nil {
@@ -216,6 +239,12 @@ func Main(args []string) int {
 	defer srv.Close()
 	go srv.Run()
 
+	workerEnvs := []map[string]string{}
+	for i := 0; i < *jobs; i++ {
+		workerEnvs = append(workerEnvs,
+			map[string]string{"QA_WORKER": fmt.Sprintf("%d", i)})
+	}
+
 	seed := int(rand.Int31())
 
 	// TODO(adamb) Parallelize this, after sanitizing name/globs specs.
@@ -246,12 +275,20 @@ func Main(args []string) int {
 			files = append(files, globFiles...)
 		}
 
-		em, err := emitter.Resolve(runnerName, srv, seed, files)
+		passthrough := map[string](interface{}) {
+			"errorsCaptureLocals": *errorsCaptureLocals,
+			"captureStandardFds": *captureStandardFds,
+			"evalAfterFork": *evalAfterFork,
+			"sampleStack": *sampleStack,
+		}
+
+		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, seed, files)
 		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error resolving", err)
 			return 1
 		}
 
-		traceEvents, runners, err := em.EnumerateTests(seed)
+		traceEvents, runners, err := em.EnumerateTests()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Enumerating tests failed.", err)
 			return 1
@@ -272,7 +309,7 @@ func Main(args []string) int {
 
 	var final tapjio.FinalEvent
 
-	final, err = suite.Run(*jobs, visitor)
+	final, err = suite.Run(workerEnvs, visitor)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error in NewTestSuiteRunner", err)
 		if exitError, ok := err.(*exec.ExitError); ok {

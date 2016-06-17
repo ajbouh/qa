@@ -1,4 +1,38 @@
+$__qa_stderr = $stderr.dup
+
 module Qa; end
+
+module Qa::Binding
+  # From https://github.com/banister/binding_of_caller/issues/57
+  # Thanks to Steve Shreeve <steve.shreeve@gmail.com>
+
+  require 'fiddle/import'
+
+  extend Fiddle::Importer
+
+  dlload Fiddle.dlopen(nil)
+
+  DebugStruct = struct [
+    "void* thread",
+    "void* frame",
+    "void* backtrace",
+    "void* contexts",
+    "long  backtrace_size"
+  ]
+
+  extern "void* rb_debug_inspector_open(void*, void*)"
+  bind("void* callback(void*, void*)") do |ptr, _|
+    DebugStruct.new(ptr).contexts
+  end
+
+  class << self
+    def callers
+      list_ptr = rb_debug_inspector_open(self['callback'], nil)
+      list = list_ptr.to_value
+      list.drop(4).map {|ary| ary[2] } # grab proper bindings
+    end
+  end
+end
 
 module Qa::Instrument
   module_function
@@ -294,12 +328,15 @@ class Qa::Trace
   require 'json'
 
   @@stackprof = false
-  begin
-    # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
-    # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
-    require 'stackprof'
-    @@stackprof = true
-  rescue LoadError
+
+  def self.enable_stackprof!
+    begin
+      # Check for ruby 2.3.0, warn if not using at least stackprof 0.2.9, link to:
+      # https://github.com/tmm1/stackprof/commit/21a7c8c67ea6abe26a68e7b117f8b36048e6fbab
+      require 'stackprof'
+      @@stackprof = true
+    rescue LoadError
+    end
   end
 
   def initialize(pid, &b)
@@ -314,9 +351,12 @@ class Qa::Trace
     @uninstall_tracers = []
   end
 
+  require 'tempfile'
   def start
     if @@stackprof
-      StackProf.start(mode: :wall, raw: true)
+      @stackprof_result_file = Tempfile.new('stackprof')
+      @stackprof_result_file.close
+      StackProf.start(mode: :wall, raw: true, out: @stackprof_result_file.path)
     end
 
     @tracers.each do |tracer|
@@ -327,7 +367,6 @@ class Qa::Trace
           emit_end(tracer,
               ARGS => {
                 'result' => val,
-                # 'caller' => caller[1],
                 'caller' => caller(1),
               })
         end
@@ -343,13 +382,16 @@ class Qa::Trace
   def stop
     if @@stackprof
       StackProf.stop
-      @stackprof_result = StackProf.results
+      StackProf.results
+      @stackprof_result = Marshal.load(IO.binread(@stackprof_result_file.path))
+      @stackprof_result_file.close!
     end
 
     @uninstall_tracers.each(&:call)
     @uninstall_tracers.clear
   end
 
+  # Use constants to avoid needless string creation while emitting stats.
   NAME = 'name'.freeze
   PID = 'pid'.freeze
   PH = 'ph'.freeze
@@ -425,7 +467,7 @@ class Qa::Trace
     end
 
     if @stackprof_result
-      emit_stackprof_result3(@stackprof_result)
+      emit_stackprof_result(@stackprof_result)
     end
   end
 
@@ -445,6 +487,7 @@ class Qa::Trace
     Thread.main == c ? 1 : c.object_id
   end
 
+  # Use constants to avoid needless string creation while emitting stats.
   FLAMEGRAPH_METRIC_NAME_V2 = 'flamegraph sample v2'.freeze
   RSPEC_PREFIX = 'RSpec::'.freeze
   RSPEC_ELLIPSIS = 'RSpec::...'.freeze
@@ -452,7 +495,7 @@ class Qa::Trace
   STACKTRACE_SEPARATOR = ';'.freeze
 
   require 'set'
-  def emit_stackprof_result3(result)
+  def emit_stackprof_result(result)
     raw = result[:raw]
 
     # Build sorted symbol list.
@@ -511,6 +554,7 @@ class Qa::Trace
         })
   end
 
+  # TODO(adamb) Use constants to avoid needless string creation while emitting stats.
   def emit_shared_memory
     @linux_memory.sample do |shared_memory|
       time_f = ::Qa::Time.now_f
@@ -539,6 +583,7 @@ class Qa::Trace
     end
   end
 
+  # Use constants to avoid needless string creation while emitting stats.
   THREAD_METRIC_NAME = 'live threads'.freeze
   THREAD_STATUS_SLEEP = 'sleep'.freeze
   THREAD_STATUS_RUN = 'run'.freeze
@@ -568,6 +613,7 @@ class Qa::Trace
         })
   end
 
+  # Use constants to avoid needless string creation while emitting stats.
   CPU_METRIC_NAME = 'cpu usage'.freeze
   CPU_SYSTEM = 'system'.freeze
   CPU_USER = 'user'.freeze
@@ -587,6 +633,7 @@ class Qa::Trace
     end
   end
 
+  # Use constants to avoid needless string creation while emitting stats.
   GC_METRIC_NAME = 'gc'.freeze
   GC_HEAP_METRIC_NAME = 'heap bytes'.freeze
   ARGS_USED_SIZE_BYTES = 'used_size_bytes'.freeze
@@ -594,6 +641,8 @@ class Qa::Trace
   GC_METRICS_KEY_USE = :HEAP_USE_SIZE
   GC_METRICS_KEY_TOTAL = :HEAP_TOTAL_SIZE
   def emit_gc
+    return unless @gc_stats
+
     prev = @last_heap_bytes_event
     @gc_stats.sample do |gc_time_f, gc_dur_ms, gc_metrics|
       invoke_time_ts = self.ts(gc_time_f)
@@ -627,14 +676,30 @@ end
 
 require 'tempfile'
 class Qa::Stdcom
+  def self.enable!
+    @@enabled = true
+  end
+
+  def self.disable!
+    @@enabled = false
+  end
+
+  enable!
+
+  def initialize
+    @out_f = nil
+    @err_f = nil
+  end
+
   def reset!
+    return unless @@enabled
     @out_f = stdio_tempfile($stdout)
     @err_f = stdio_tempfile($stderr)
   end
 
   #
   def drain!(doc)
-    return doc unless (@out_f && @err_f)
+    return doc unless @@enabled && @out_f && @err_f
 
     stdout = drain_tempfile($stdout, @out_f).chomp("\n")
     stderr = drain_tempfile($stderr, @err_f).chomp("\n")
@@ -658,9 +723,6 @@ class Qa::Stdcom
   ensure
     tempfile.close!
   end
-
-  #
-
 end
 
 module Qa::TapjExceptions
@@ -669,61 +731,72 @@ module Qa::TapjExceptions
   @@_source_cache = {}
 
   def summarize_exception(error, backtrace, message=nil)
-    e_file, e_line = location(backtrace)
-    r_file = e_file.sub(Dir.pwd+'/', '')
+    # [{"file" => "...", "line" => N, "variables" => {"..." => "", ...}}, ...]
+
+    backtrace_bindings = error.instance_variable_get(:@__qa_caller_bindings)
+
+    backtrace = backtrace.each_with_index.map do |entry, index|
+      entry =~ /(.+?):(\d+(?=:|\z))/ || (next nil)
+
+      h = {"file" => $1, "line" => $2.to_i}
+      if backtrace_bindings && b = backtrace_bindings[index]
+        method, locals = b.eval("[__method__, local_variables]")
+        if entry.end_with?("in `#{method}'")
+          h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
+        else
+          $__qa_stderr.puts "mismatch: '#{entry}' doesn't end with: '#{method}'"
+        end
+      end
+
+      h
+    end
+
+    backtrace = filter_backtrace(backtrace)
+
+    snippets = {} # {"<path>": {N => "...", ...}, ...}
+    backtrace.each do |entry|
+      file, line = entry["file"], entry["line"]
+      snippet = (snippets[file] ||= {})
+      snippet.update(code_snippet(file, line))
+    end
 
     {
-      'message'   => clean_message(message || error.message),
+      'message'   => (message || error.message).strip,
       'class'     => error.class.name,
-      'file'      => r_file,
-      'line'      => e_line,
-      'source'    => (source(e_file)[e_line-1] || '').strip,
-      'snippet'   => code_snippet(e_file, e_line),
-      'backtrace' => filter_backtrace(backtrace)
+      'snippets'  => snippets,
+      'backtrace' => backtrace,
     }
-  end
-
-  def clean_message(message)
-    message.strip #.gsub(/\s*\n\s*/, "\n")
   end
 
   # Clean the backtrace of any reference to test framework itself.
   def filter_backtrace(backtrace)
-    ## remove backtraces that match any pattern in IGNORE_CALLERS
-    # trace = backtrace.reject{|b| $RUBY_IGNORE_CALLERS.any?{|i| i=~b}}
+    trace = backtrace
 
-    ## remove `:in ...` portion of backtraces
-    trace = backtrace.map do |bt|
-      i = bt.index(':in')
-      i ? bt[0...i] :  bt
-    end
-
-    ## now apply MiniTest's own filter (note: doesn't work if done first, why?)
-    trace = Minitest::filter_backtrace(trace) if defined?(Minitest)
+    # eliminate ourselves from the list.
+    trace = trace.select { |e| !e['file'].start_with?("-e") }
 
     ## if the backtrace is empty now then revert to the original
     trace = backtrace if trace.empty?
 
-    ## simplify paths to be relative to current workding diectory
-    trace = trace.map{ |bt| bt.sub(Dir.pwd+File::SEPARATOR,'') }
+    ## simplify paths to be relative to current working diectory
+    here = Dir.pwd+File::SEPARATOR
+    trace.each { |e| e['file'] = e['file'].sub(here,'') }
 
-    return trace
+    trace
   end
 
-  # Returns a String of source code.
-  def code_snippet(file, line)
-    s = []
-    if File.file?(file)
-      source = source(file)
-      radius = 2 # TODO: make customizable (number of surrounding lines to show)
-      region = [line - radius, 1].max ..
-               [line + radius, source.length].min
+  # (number of surrounding lines to show)
+  CODE_SNIPPET_RADIUS = 10
 
-      s = region.map do |n|
-        {n => source[n-1].chomp}
-      end
-    end
-    return s
+  # Returns {N-1 => "...", N => "...", N+1 => "...", ...}
+  def code_snippet(file, line)
+    return {} unless file && File.file?(file)
+
+    src = source(file)
+    region = [line - CODE_SNIPPET_RADIUS, 1].max ..
+             [line + CODE_SNIPPET_RADIUS, src.length].min
+
+    Hash[region.map { |n| [n, src[n-1].chomp] }]
   end
 
   # Cache source file text. This is only used if the TAP-Y stream
@@ -733,32 +806,6 @@ module Qa::TapjExceptions
     @@_source_cache[file] ||= (
       File.readlines(file)
     )
-  end
-
-  # Parse source location from caller, caller[0] or an Exception object.
-  def parse_source_location(caller)
-    case caller
-    when Exception
-      trace  = caller.backtrace.reject{ |bt| bt =~ INTERNALS }
-      caller = trace.first
-    when Array
-      caller = caller.first
-    end
-    caller =~ /(.+?):(\d+(?=:|\z))/ or return ""
-    source_file, source_line = $1, $2.to_i
-    return source_file, source_line
-  end
-
-  # Get location of exception.
-  def location backtrace # :nodoc:
-    last_before_assertion = ""
-    backtrace.reverse_each do |s|
-      break if s =~ /in .(assert|refute|flunk|pass|fail|raise|must|wont)/
-      last_before_assertion = s
-    end
-    file, line = last_before_assertion.sub(/:in .*$/, '').split(':')
-    line = line.to_i if line
-    return file, line
   end
 end
 
@@ -862,8 +909,6 @@ module ::Qa::Warmup::Autoload
     while m = soon.pop
       visited.add(m)
       m.constants(false).each do |c|
-        # next unless m.autoload?(c)
-
         begin
           val = m.const_get(c)
           next unless (val.is_a?(Module) || val.is_a?(Class)) && !visited.member?(val)
@@ -914,10 +959,15 @@ end
 module ::Qa::Warmup::RailsActiveRecord
   module_function
 
-  def resume(connections_by_spec)
-    if defined?(ActiveRecord::Base)
-      spec = Rails.application.config.database_configuration[Rails.env]
-      connection = connections_by_spec[spec]
+  def rails_database_configuration
+    Rails.application.config.database_configuration[Rails.env]
+  end
+
+  def resume(cache, env)
+    if defined?(Rails) && defined?(ActiveRecord::Base) &&
+        connection_cache = cache[:rails_database_connections]
+      connection = connection_cache[env]
+
       begin
         connection.reconnect!
       rescue PG::ConnectionBad
@@ -930,55 +980,107 @@ module ::Qa::Warmup::RailsActiveRecord
     end
   end
 
-  def warmup_envs(envs)
-    connections_by_spec = {}
-    return connections_by_spec unless defined?(Rails) && defined?(ActiveRecord::Base)
-
-    envs.each do |env|
-      saved = ENV.to_hash.values_at(env.keys)
-      env.each do |k, v|
-        ENV[k] = v
-      end
-
-      spec = Rails.application.config.database_configuration[Rails.env]
-      $stderr.puts "Warming up spec #{spec}"
-      env.keys.zip(saved).each do |(k, v)|
-        ENV[k] = v
-      end
-
-      ActiveRecord::Base.establish_connection(spec)
-      ActiveRecord::Base.connection_pool.with_connection do
-        warmup_connection
-      end
-      connection = ActiveRecord::Base.connection_pool.checkout
-      connection.disconnect!
-
-      connections_by_spec[spec] = connection
+  def with_env(env)
+    saved = ENV.to_hash.values_at(env.keys)
+    env.each do |k, v|
+      ENV[k] = v
     end
 
-    connections_by_spec
+    yield
+  ensure
+    env.keys.zip(saved).each do |(k, v)|
+      ENV[k] = v
+    end
+  end
+
+  def warmup_envs(envs)
+    cache = Hash.new { |h, k| h[k] = {} }
+
+    if defined?(Rails) && defined?(ActiveRecord::Base)
+      default_rails_db_cfg = rails_database_configuration
+      default_db = default_rails_db_cfg['database']
+    end
+
+    envs.each do |env|
+      with_env(env) do
+        if defined?(Rails) && defined?(ActiveRecord::Base)
+          connection_cache = cache[:rails_database_connections]
+          config = rails_database_configuration
+          if config['database'] == default_db
+            config['database'] = "#{config['database']}_qa#{env['QA_WORKER']}"
+
+            $__qa_stderr.puts "Warming up (overridden) config #{config}"
+            ActiveRecord::Base.establish_connection(config)
+            begin
+              ActiveRecord::Base.connection
+            rescue ActiveRecord::NoDatabaseError
+              # HACK(adamb) Need to create it now!
+              $__qa_stderr.puts "WARNING the given database DOES NOT EXIST YET! Will create it now."
+              ActiveRecord::Base.configurations       = {}
+              ActiveRecord::Migrator.migrations_paths = ActiveRecord::Tasks::DatabaseTasks.migrations_paths
+              ActiveRecord::Tasks::DatabaseTasks.current_config = config
+              ActiveRecord::Tasks::DatabaseTasks.create(config)
+              ActiveRecord::Base.establish_connection(config)
+              ActiveRecord::Base.connection
+              ActiveRecord::Tasks::DatabaseTasks.migrate
+            end
+          else
+            $stderr.puts "Warming up config #{config}"
+            ActiveRecord::Base.establish_connection(config)
+          end
+
+          ActiveRecord::Base.connection_pool.with_connection do
+            warmup_connection
+          end
+          connection = ActiveRecord::Base.connection_pool.checkout
+          connection.disconnect!
+
+          connection_cache[env] = connection
+        end
+      end
+    end
+
+    cache.default_proc = nil
+    cache.freeze
+    cache
   end
 
   def warmup_connection
-    if defined?(ActiveRecord::Base)
-      # Enumerating columns populates schema caches for the existing connection.
-      ActiveRecord::Base.descendants.each do |model|
-        begin
-          model.columns
-        rescue ActiveRecord::StatementInvalid
-          nil
-        end
-      end
-
-      # Eagerly define_attribute_methods on all known models
-      ActiveRecord::Base.descendants.each do |model|
-        begin
-          model.define_attribute_methods
-        rescue ActiveRecord::StatementInvalid
-          nil
-        end
-      end
+    (ActiveRecord::Base.connection.tables - %w[schema_migrations]).each do |table|
+      table.classify.constantize.first rescue nil
     end
+
+    if defined?(SeedFu)
+      SiteSetting.automatically_download_gravatars = false
+      SeedFu.seed
+    end
+
+    # # warm up AR
+    # RailsMultisite::ConnectionManagement.each_connection do
+    #   (ActiveRecord::Base.connection.tables - %w[schema_migrations]).each do |table|
+    #     table.classify.constantize.first rescue nil
+    #   end
+    # end
+
+    # if defined?(ActiveRecord::Base)
+    #   # Enumerating columns populates schema caches for the existing connection.
+    #   ActiveRecord::Base.descendants.each do |model|
+    #     begin
+    #       model.columns
+    #     rescue ActiveRecord::StatementInvalid
+    #       nil
+    #     end
+    #   end
+    #
+    #   # Eagerly define_attribute_methods on all known models
+    #   ActiveRecord::Base.descendants.each do |model|
+    #     begin
+    #       model.define_attribute_methods
+    #     rescue ActiveRecord::StatementInvalid
+    #       nil
+    #     end
+    #   end
+    # end
 
     if defined?(Fabrication)
       Fabrication.manager.schematics.each_value do |schematic|
@@ -1013,7 +1115,7 @@ module ::Qa::Warmup::RailsActiveRecord
   end
 end
 
-class ::Qa::OptionParser
+class ::Qa::ClientOptionParser
   attr_reader :dry_run
   attr_reader :trace_probes
   attr_reader :seed
@@ -1075,6 +1177,7 @@ class ::Qa::TestEngine
       trace_probes.push(args.delete_at(trace_probe_ix))
     end
 
+    # Collect trace events for transmission later.
     trace_events = []
     qa_trace = ::Qa::Trace.new(Process.pid) { |e| trace_events.push(e) }
     trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
@@ -1082,51 +1185,90 @@ class ::Qa::TestEngine
 
     socket = ::Qa::ClientSocket.connect(args.shift)
 
-    # HACK(adamb) This needs to be an argument, somehow. It's poor form to try to do this like this.
-    begin
-      require 'rails_helper'
-    rescue LoadError
-    end
+    # Read first line from socket to get initial config.
+    initial_json = socket.gets
+    initial_config = JSON.parse(initial_json)
+    worker_envs, initial_files = initial_config['workerEnvs'], initial_config['files']
+    passthrough = initial_config['passthrough']
 
-    @prefork.call(args)
+    # Delegate prefork actions.
+    @prefork.call(initial_files)
 
+    # Autoload constants.
     ::Qa::Warmup::Autoload.warmup
 
     conserved = ::Qa::ConservedInstancesSet.new
+
+    # Once we've warmed up, we don't want more SchemaCache instances created. If we see more,
+    # then there's something wrong with our warmup (or resume). Add the class to our conserved
+    # set.
     if defined?(ActiveRecord::ConnectionAdapters::SchemaCache)
       conserved.add_class(ActiveRecord::ConnectionAdapters::SchemaCache)
     end
 
-    # TODO(adamb) Update the below to properly initialize caches for all possible envs
-    envs = [
-      {'QA_WORKER' => nil},
-      {'QA_WORKER' => '1'},
-      # {'QA_WORKER' => '2'},
-    ]
-    connections_by_spec = ::Qa::Warmup::RailsActiveRecord.warmup_envs(envs)
+    # Warm up each worker environment.
+    cache = ::Qa::Warmup::RailsActiveRecord.warmup_envs(worker_envs)
 
+    # From here on, we don't expect to see new instances for any of our conserved classes.
     conserved.remember!
 
     # Get a clean GC state, marking remaining objects as old in ruby 2.2
-    GC.disable
-    GC.enable
     3.times { GC.start }
 
+    # The hard work is done for now. Emit statistics so they'll be ready for
+    # transmission later.
     qa_trace.emit_final_stats
+
+    # Decide whether or not we're capturing stdout, stderr during test runs.
+    if passthrough['captureStandardFds']
+      Qa::Stdcom.enable!
+    else
+      Qa::Stdcom.disable!
+    end
+
+    if passthrough['sampleStack']
+      Qa::Trace.enable_stackprof!
+    end
+
+    case passthrough['errorsCaptureLocals'].to_s
+    when 'true'
+      TracePoint.new(:raise) do |tp|
+        e = tp.raised_exception
+        c = ::Qa::Binding.callers
+        e.instance_variable_set(:@__qa_caller_bindings, c)
+      end.enable
+    when 'TracePoint.new(:raise)'
+      TracePoint.new(:raise) do |tp|
+        e = tp.raised_exception
+        c = ::Qa::Binding.callers
+        e.instance_variable_set(:@__qa_caller_bindings, c)
+      end.enable
+    when 'Exception#initialize'
+      ::Exception.class_exec do
+        alias :__qa_original_initialize :initialize
+        def initialize(*args, &b)
+          __qa_original_initialize(*args, &b)
+
+          @__qa_caller_bindings = ::Qa::Binding.callers
+        end
+      end
+    end
+
+    eval_after_fork = (passthrough['evalAfterFork'] || '')
 
     socket.each_line do |line|
       env, args = JSON.parse(line)
 
-      accept_client(connections_by_spec, env, args, conserved, trace_probes, trace_events)
+      accept_client(cache, env, args, eval_after_fork, conserved, trace_probes, trace_events)
 
       # Only pass trace_events along to the first client.
       trace_events.clear
     end
   end
 
-  def accept_client(connections_by_spec, env, args, conserved, trace_probes, trace_events)
+  def accept_client(cache, env, args, eval_after_fork, conserved, trace_probes, trace_events)
     p = Process.fork do
-      opt = ::Qa::OptionParser.new
+      opt = ::Qa::ClientOptionParser.new
       tests = opt.parse(args)
 
       seed = opt.seed
@@ -1146,7 +1288,13 @@ class ::Qa::TestEngine
         ENV[k] = v
       end
 
-      @run_tests.call(qa_trace, opt, connections_by_spec, tapj_conduit, tests)
+      unless opt.dry_run
+        ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
+
+        eval(eval_after_fork) unless eval_after_fork.empty?
+      end
+
+      @run_tests.call(qa_trace, opt, tapj_conduit, tests)
 
       conserved.check_conservation
 

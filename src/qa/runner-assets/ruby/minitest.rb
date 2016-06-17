@@ -162,7 +162,7 @@ engine.def_prefork do |files|
   end
 end
 
-engine.def_run_tests do |qa_trace, opt, connections_by_spec, tapj_conduit, tests|
+engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   if opt.dry_run
     Minitest.instance_eval do
       class <<self

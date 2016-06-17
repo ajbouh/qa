@@ -10,10 +10,10 @@ import (
 
 type Emitter interface {
 	TraceProbes() []string
-	EnumerateTests(seed int) ([]tapjio.TraceEvent, []runner.TestRunner, error)
+	EnumerateTests() ([]tapjio.TraceEvent, []runner.TestRunner, error)
 }
 
-type emitterStarter func(srv *server.Server, seed int, files []string) (Emitter, error)
+type emitterStarter func(srv *server.Server, passthroughConfig map[string](interface{}), workerEnvs []map[string]string, seed int, files []string) (Emitter, error)
 
 var rubyTraceProbes = []string{
 	"Kernel#require(path)",
@@ -28,15 +28,22 @@ var rubyTraceProbes = []string{
 }
 
 func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitterStarter {
-	return func(srv *server.Server, seed int, files []string) (Emitter, error) {
-		context := ruby.NewRubyContext(seed, runnerAssetName, rubyTraceProbes, srv)
-		context.SquashPolicy(policy)
-		err := context.Start(files)
+	return func(srv *server.Server, passthroughConfig map[string](interface{}), workerEnvs []map[string]string, seed int, files []string) (Emitter, error) {
+		config := &ruby.ContextConfig{
+			Seed:            seed,
+			Rubylib:         []string{"spec", "lib", "test"},
+			RunnerAssetName: runnerAssetName,
+			TraceProbes:     rubyTraceProbes,
+			SquashPolicy:    policy,
+			PassthroughConfig: passthroughConfig,
+		}
+
+		ctx, err := ruby.StartContext(config, srv, workerEnvs, files)
 		if err != nil {
 			return nil, err
 		}
 
-		return context, nil
+		return ctx, nil
 	}
 }
 
@@ -52,11 +59,11 @@ var starters = map[string]emitterStarter{
 	"test-unit-pendantic": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashNothing),
 }
 
-func Resolve(name string, srv *server.Server, seed int, files []string) (Emitter, error) {
+func Resolve(name string, srv *server.Server, passthroughConfig map[string](interface{}), workerEnvs []map[string]string, seed int, files []string) (Emitter, error) {
 	starter, ok := starters[name]
 	if !ok {
 		return nil, errors.New("Could not find starter: " + name)
 	}
 
-	return starter(srv, seed, files)
+	return starter(srv, passthroughConfig, workerEnvs, seed, files)
 }

@@ -132,7 +132,7 @@ module Test::Unit::UI::Tap
 
         doc.merge!(
             'status'      => 'error',
-            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location))
+            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault.exception, fault.location))
       end
 
       @stdcom.drain!(doc)
@@ -190,7 +190,7 @@ engine.def_prefork do |files|
   end
 end
 
-engine.def_run_tests do |qa_trace, opt, connections_by_spec, tapj_conduit, tests|
+engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   if opt.dry_run
     Test::Unit::TestCase.class_eval do
       remove_method :run_test

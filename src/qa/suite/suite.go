@@ -42,8 +42,10 @@ func NewTestSuiteRunner(seed int,
 }
 
 func (self *testSuiteRunner) Run(
-	maxJobs int,
+	workerEnvs []map[string]string,
 	visitor tapjio.Visitor) (final tapjio.FinalEvent, err error) {
+
+	numWorkers := len(workerEnvs)
 	startTime := time.Now().UTC()
 
 	suite := tapjio.NewSuiteEvent(startTime, self.count, self.seed)
@@ -63,9 +65,14 @@ func (self *testSuiteRunner) Run(
 		}
 	}()
 
-	var testRunnerChan = make(chan runner.TestRunner, maxJobs)
+	var testRunnerChan = make(chan runner.TestRunner, numWorkers)
 
+	// Enqueue each testRunner on testRunnerChan
 	go func() {
+		// Sort runners by test count. This heuristic helps our workers avoid being idle
+		// near the end of the run by running testRunners with the most tests first, avoiding
+		// scenarios where the last testRunner we run has many tests, causing the entire test
+		// run to drag on needlessly while other workers are idle.
 		runner.By(func(r1, r2 *runner.TestRunner) bool { return (*r2).TestCount() < (*r1).TestCount() }).Sort(self.runners)
 
 		for _, testRunner := range self.runners {
@@ -75,15 +82,15 @@ func (self *testSuiteRunner) Run(
 	}()
 
 	var abort = false
-	var traceChan = make(chan tapjio.TraceEvent, maxJobs)
-	var testResultChan = make(chan testResult, maxJobs)
-	var testStartChan = make(chan tapjio.TestStartedEvent, maxJobs)
+	var traceChan = make(chan tapjio.TraceEvent, numWorkers)
+	var testResultChan = make(chan testResult, numWorkers)
+	var testStartChan = make(chan tapjio.TestStartedEvent, numWorkers)
 
 	var awaitJobs sync.WaitGroup
-	awaitJobs.Add(maxJobs)
+	awaitJobs.Add(numWorkers)
 
-	for i := 0; i < maxJobs; i++ {
-		i := i
+	for _, workerEnv := range workerEnvs {
+		env := workerEnv
 		go func() {
 			defer awaitJobs.Done()
 			for testRunner := range testRunnerChan {
@@ -95,7 +102,7 @@ func (self *testSuiteRunner) Run(
 					var awaitRun sync.WaitGroup
 					awaitRun.Add(1)
 					testRunner.Run(
-						map[string]string{"QA_WORKER": fmt.Sprintf("%d", i)},
+						env,
 						tapjio.DecodingCallbacks{
 							OnTestBegin: func(test tapjio.TestStartedEvent) error {
 								testStartChan <- test

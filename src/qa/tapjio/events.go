@@ -72,19 +72,28 @@ type TraceEvent struct {
 type TestException struct {
 	Message string `json:"message"`
 	Class   string `json:"class"`
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Source  string `json:"source"`
 
-	// e.g. [
-	//  {"3":"class SkipTest < Minitest::Test"},{"4":"  def test_skip"},{"5":"    skip"},{"6":"  end"},{"7":"end"}
-	// ],
-	Snippet []map[string]string `json:"snippet"`
+	// e.g. {
+	//  "somerubyfile.rb": {
+	//   "3":"class SkipTest < Minitest::Test",
+	//   "4":"  def test_skip",
+	//   "5":"    skip",
+	//   "6":"  end",
+	//   "7":"end"
+	//  }
+	// },
+	Snippets map[string]map[string]string `json:"snippets"`
 
 	// e.g. [
 	//  "test/skip-test.rb:5"
 	// ]
-	Backtrace []string `json:"backtrace"`
+	Backtrace []BacktraceLocation `json:"backtrace"`
+}
+
+type BacktraceLocation struct {
+	File      string            `json:"file"`
+	Line      int               `json:"line"`
+	Variables map[string]string `json:"variables"`
 }
 
 type TestStartedEvent struct {
