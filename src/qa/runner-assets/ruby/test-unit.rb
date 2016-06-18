@@ -87,6 +87,15 @@ module Test::Unit::UI::Tap
     def tapout_before_test(test)
       @test_start = ::Qa::Time.now_f
       @test = test
+      @already_outputted = false
+
+      emit(
+          'type' => 'note',
+          'qa:type' => 'test:begin',
+          'qa:timestamp' => @test_start,
+          'qa:label' => clean_label(test.name),
+          'qa:filter' => "#{@test.class.name}##{test.method_name}")
+
       # set up stdout and stderr to be captured
       @stdcom.reset!
     end
@@ -146,7 +155,6 @@ module Test::Unit::UI::Tap
     #
     def tapout_pass(test)
       if @already_outputted
-        @already_outputted = false
         return nil
       end
 
@@ -174,6 +182,7 @@ module Test::Unit::UI::Tap
 
     def emit(doc)
       @output.emit(doc)
+      @output.flush
     end
   end
 end
