@@ -153,7 +153,7 @@ func (self *testSuiteRunner) Run(
 			err = testResult.testError
 			if err == nil {
 				test := testResult.testEvent
-				(&final.Counts).Increment(test.Status)
+				final.Counts.Increment(test.Status)
 
 				err = visitor.TestFinished(test)
 				if err != nil {
@@ -163,7 +163,7 @@ func (self *testSuiteRunner) Run(
 
 			if err != nil {
 				abort = true
-				(&final.Counts).Increment(tapjio.Error)
+				final.Counts.Increment(tapjio.Error)
 				fmt.Fprintln(os.Stderr, "Error:", err)
 				return
 			}

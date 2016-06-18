@@ -315,7 +315,7 @@ func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
 		counts.Total,
 		millisDuration(final.Time),
 		millisDuration(self.timeCop.TotalDuration),
-		self.summarizeTally(counts))
+		self.summarizeTally(*counts))
 
 	// If there are errors/fails don't show any SLOW PASSes
 	if self.timeCop.Passed() && len(self.timeCop.SlowPassingOutcomes) > 0 {
@@ -342,5 +342,9 @@ func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
 		}
 	}
 
+	return nil
+}
+
+func (t *Pretty) End(reason error) error {
 	return nil
 }

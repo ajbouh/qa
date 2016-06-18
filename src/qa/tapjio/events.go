@@ -153,7 +153,7 @@ func (r *ResultTally) Increment(status Status) {
 type FinalEvent struct {
 	Type   string         `json:"type"`
 	Time   float64        `json:"time"`
-	Counts ResultTally    `json:"counts"`
+	Counts *ResultTally    `json:"counts"`
 	Stats  map[string]int `json:"qa:stats,omitempty"`
 	MetaStats map[string]int
 
@@ -166,6 +166,7 @@ func NewFinalEvent(suite *SuiteEvent) *FinalEvent {
 		Suite: suite,
 		Stats: make(map[string]int),
 		MetaStats: make(map[string]int),
+		Counts: &ResultTally{},
 	}
 }
 
