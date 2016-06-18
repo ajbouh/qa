@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"errors"
 	// "io"
 	"io/ioutil"
 	"log"
@@ -38,7 +39,7 @@ func maybeJoin(p string, dir string) string {
 	return p
 }
 
-func Main(args []string) int {
+func Main(args []string) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Cur: 999999999, Max: 999999999}); err != nil {
 		log.Fatal("Could not enable core dumps: ", err)
 	}
@@ -61,8 +62,7 @@ func Main(args []string) int {
 
 	err := flags.Parse(args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return err
 	}
 
 	if *saveStacktraces != "" || *saveFlamegraph != "" || *saveIcegraph != "" {
@@ -88,14 +88,13 @@ func Main(args []string) int {
 	case "pretty":
 		visitors = append(visitors, reporting.NewPretty(os.Stdout, *jobs))
 	default:
-		fmt.Fprintln(os.Stderr, "Unknown format", *format)
-		return 254
+		return errors.New(fmt.Sprintf("Unknown format: %v", *format))
 	}
 
 	if *saveTapj != "" {
 		tapjFile, err := os.Create(*saveTapj)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		defer tapjFile.Close()
 		visitors = append(visitors, tapjio.NewTapjEmitter(tapjFile))
@@ -104,7 +103,7 @@ func Main(args []string) int {
 	if *saveTrace != "" {
 		traceFile, err := os.Create(*saveTrace)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		defer traceFile.Close()
 		visitors = append(visitors, tapjio.NewTraceWriter(traceFile))
@@ -221,8 +220,7 @@ func Main(args []string) int {
 	// srv, err := server.Listen("tcp", "127.0.0.1:0")
 	srv, err := server.Listen("unix", "/tmp/qa")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Starting internal server failed.", err)
-		return 1
+		return err
 	}
 
 	// Handle common process-killing signals so we can gracefully shut down:
@@ -268,8 +266,7 @@ func Main(args []string) int {
 			globFiles, err := zglob.Glob(glob)
 			fmt.Fprintf(os.Stderr, "Resolved %v to %v\n", glob, globFiles)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Resolving glob.", err)
-				return 1
+				return err
 			}
 
 			files = append(files, globFiles...)
@@ -284,14 +281,12 @@ func Main(args []string) int {
 
 		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, seed, files)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error resolving", err)
-			return 1
+			return err
 		}
 
 		traceEvents, runners, err := em.EnumerateTests()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Enumerating tests failed.", err)
-			return 1
+			return err
 		}
 
 		allRunners = append(allRunners, runners...)
@@ -299,8 +294,7 @@ func Main(args []string) int {
 		for _, traceEvent := range traceEvents {
 			err := visitor.TraceEvent(traceEvent)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Trace event processing failed", err)
-				return 1
+				return err
 			}
 		}
 	}
@@ -316,18 +310,14 @@ func Main(args []string) int {
 			if len(exitError.Stderr) > 0 {
 				fmt.Fprintln(os.Stderr, string(exitError.Stderr))
 			}
-
-			waitStatus := exitError.Sys().(syscall.WaitStatus)
-			return waitStatus.ExitStatus()
 		}
 
-		fmt.Fprintln(os.Stderr, "Test runner enumeration failed.")
-		return 1
+		return err
 	}
 
 	if !final.Passed() {
-		return 1
+		return errors.New("Test(s) failed.")
 	}
 
-	return 0
+	return nil
 }

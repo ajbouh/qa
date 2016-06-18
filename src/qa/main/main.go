@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"qa/cmd/flamegraph"
@@ -11,28 +12,23 @@ import (
 func main() {
 	var status int
 	command := os.Args[1]
+	var err error
 	switch command {
 	case "run":
-		status = run.Main(os.Args[2:])
+		err = run.Main(os.Args[2:])
 	case "flamegraph":
-		err := flamegraph.Main(os.Args[2:])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			status = 1
-		} else {
-			status = 0
-		}
+		err = flamegraph.Main(os.Args[2:])
 	case "stackcollapse":
-		err := stackcollapse.Main(os.Args[2:])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			status = 1
-		} else {
-			status = 0
-		}
+		err = stackcollapse.Main(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
+		err = errors.New("Unknown command: " + command)
+	}
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		status = 1
+	} else {
+		status = 0
 	}
 
 	os.Exit(status)
