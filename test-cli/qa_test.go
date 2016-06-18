@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"os/exec"
 	"path"
-	"qa/tapj"
+	"qa/tapjio"
 	"testing"
 )
 
@@ -14,7 +14,12 @@ import (
 func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err error) {
 	events = make([]interface{}, 0)
 
-	cmd := exec.Command("qa", "-format=tapj")
+	cmd := exec.Command("qa",
+		"run",
+		"-format=tapj",
+		"rspec:spec/**/*_spec.rb",
+		"minitest:test/minitest/**/test*.rb",
+		"test-unit:test/test-unit/**/test*.rb")
 	cmd.Dir = dir
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
@@ -29,9 +34,28 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 		return
 	}
 
-	err = tapj.Decoder{stdout}.Decode(
-		&tapj.DecodingCallbacks{
-			OnEvent: func(event interface{}) error { events = append(events, event); return nil },
+	err = tapjio.Decode(stdout,
+		&tapjio.DecodingCallbacks{
+			OnSuite: func(event tapjio.SuiteEvent) error {
+				events = append(events, event)
+				return nil
+			},
+			OnTestBegin: func(event tapjio.TestStartedEvent) error {
+				events = append(events, event)
+				return nil
+			},
+			OnTest:  func(event tapjio.TestEvent) error {
+				events = append(events, event)
+				return nil
+			},
+			OnTrace: func(event tapjio.TraceEvent) error {
+				events = append(events, event)
+				return nil
+			},
+			OnFinal: func(event tapjio.FinalEvent) error {
+				events = append(events, event)
+				return nil
+			},
 		})
 
 	cmdErr := cmd.Wait()
@@ -50,7 +74,7 @@ func testRunner(t *testing.T, baseDir string) {
 
 	events, stderr, err = runQa(t, path.Join(baseDir, "simple"))
 	if err != nil {
-		t.Fatal("qa failed here.", stderr)
+		t.Fatal("qa failed here.", err, stderr)
 	}
 
 	if len(events) == 0 {
@@ -58,15 +82,11 @@ func testRunner(t *testing.T, baseDir string) {
 	}
 
 	finalEvent := events[len(events)-1]
-	if fe, ok := finalEvent.(*tapj.FinalEvent); ok {
-		expect := tapj.FinalEvent{
-			Type:   fe.Type,
-			Time:   fe.Time,
-			Counts: tapj.ResultTally{Total: 6, Pass: 6},
-		}
+	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
+		expect := tapjio.ResultTally{Total: 6, Pass: 6}
 
-		if expect != *fe {
-			t.Fatal("wrong count in final event.", expect, "vs", *fe, events, stderr)
+		if expect != *fe.Counts {
+			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, events, stderr)
 		}
 	} else {
 		t.Fatal("last event wasn't a final event.", events, stderr)
@@ -82,21 +102,17 @@ func testRunner(t *testing.T, baseDir string) {
 	}
 
 	finalEvent = events[len(events)-1]
-	if fe, ok := finalEvent.(*tapj.FinalEvent); ok {
-		expect := tapj.FinalEvent{
-			Type: fe.Type,
-			Time: fe.Time,
-			Counts: tapj.ResultTally{
-				Total: 12,
-				Pass:  3,
-				Fail:  3,
-				Todo:  3,
-				Error: 3,
-			},
+	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
+		expect := tapjio.ResultTally{
+			Total: 12,
+			Pass:  3,
+			Fail:  3,
+			Todo:  3,
+			Error: 3,
 		}
 
-		if expect != *fe {
-			t.Fatal("wrong count in final event.", expect, "vs", fe, events, stderr)
+		if expect != *fe.Counts {
+			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, events, stderr)
 		}
 	} else {
 		t.Fatal("last event wasn't a final event.", events, stderr)

@@ -97,6 +97,7 @@ type BacktraceLocation struct {
 }
 
 type TestStartedEvent struct {
+	TapjType  string  `json:"type"`
 	Type      string  `json:"qa:type"`
 	Timestamp float64 `json:"qa:timestamp"`
 	Label     string  `json:"qa:label"`
@@ -104,6 +105,12 @@ type TestStartedEvent struct {
 	Filter    string  `json:"qa:filter"`
 
 	Cases     []CaseEvent
+}
+
+func newTestStartedEvent() *TestStartedEvent {
+	return &TestStartedEvent{
+		TapjType: "note",
+	}
 }
 
 type TestEvent struct {
@@ -437,7 +444,7 @@ func UnmarshalEvent(value []byte) (err error, event interface{}) {
 		event = NewFinalEvent(nil)
 	case "note":
 		if baseEvent.QaType != nil && *baseEvent.QaType == "test:begin" {
-			event = new(TestStartedEvent)
+			event = newTestStartedEvent()
 		}
 	default:
 		err = errors.New("Unknown type: '" + baseEvent.Type + "': " + string(value))

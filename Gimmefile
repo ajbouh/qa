@@ -13,10 +13,11 @@
           "vendor/rspec:rspec"
         ]
       },
+      "sandbox-allows-local-networking": true,
       "commands": [
         "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio",
         "env GOPATH=$PWD:$GIMME_SCRATCH go build -o $GIMME_OUTPUT/bin/qa qa/main",
-        //"cd test-cli; env GOPATH=$PWD/..:$GIMME_SCRATCH PATH=$GIMME_OUTPUT/bin:$PATH go test"
+        "cd test-cli; env GOPATH=$PWD/..:$GIMME_SCRATCH PATH=$GIMME_OUTPUT/bin:$PATH go test",
         "true"
       ],
       "prepend-platform-env": {
