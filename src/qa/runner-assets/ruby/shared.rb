@@ -706,6 +706,8 @@ class Qa::Stdcom
 
     doc['stdout'] = stdout unless stdout.empty?
     doc['stderr'] = stderr unless stderr.empty?
+  rescue
+    $__qa_stderr.puts([$!, *$@].join("\n\t"))
   end
 
   private
