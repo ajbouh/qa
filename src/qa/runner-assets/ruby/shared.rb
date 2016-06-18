@@ -1008,7 +1008,7 @@ module ::Qa::Warmup::RailsActiveRecord
         if defined?(Rails) && defined?(ActiveRecord::Base)
           connection_cache = cache[:rails_database_connections]
           config = rails_database_configuration
-          if config['database'] == default_db
+          if config['database'] == default_db && envs.length > 1 && defined?(ActiveRecord::NoDatabaseError)
             config['database'] = "#{config['database']}_qa#{env['QA_WORKER']}"
 
             $__qa_stderr.puts "Warming up (overridden) config #{config}"
