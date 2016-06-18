@@ -2,7 +2,7 @@ require 'test/unit'
 require 'my-library'
 
 class SimpleTestUnitTest < Test::Unit::TestCase
-  def test_library
+  def test_library_test_unit
     MyLibrary.new
   end
 

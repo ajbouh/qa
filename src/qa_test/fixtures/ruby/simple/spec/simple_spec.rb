@@ -1,7 +1,7 @@
 require 'my-library'
 
 RSpec.describe MyLibrary, ".new" do
-  it "works" do
+  it "my library rspec" do
     MyLibrary.new
   end
 

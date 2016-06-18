@@ -2,7 +2,7 @@ require 'minitest/unit'
 require 'my-library'
 
 class SimpleMinitestTest < Minitest::Test
-  def test_library
+  def test_library_minitest
     MyLibrary.new
   end
 

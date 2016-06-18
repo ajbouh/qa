@@ -1,21 +1,30 @@
 package qa_test
 
-// go test .
-
 import (
 	"bytes"
 	"io"
-	"os"
 	"path"
 	"qa/cmd"
 	"qa/cmd/run"
 	"qa/tapjio"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
+type transcript struct {
+	Stderr            string
+	Events            []interface{}
+	SuiteEvents       []tapjio.SuiteEvent
+	TestEvents        []tapjio.TestEvent
+	TestStartedEvents []tapjio.TestStartedEvent
+	TraceEvents       []tapjio.TraceEvent
+	FinalEvents       []tapjio.FinalEvent
+}
+
 // TODO which ruby version must qa want to run?
-func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err error) {
-	events = make([]interface{}, 0)
+func runQa(t *testing.T, dir string) (tscript transcript, err error) {
+	tscript.Events = make([]interface{}, 0)
 
 	var stderrBuf bytes.Buffer
 
@@ -26,7 +35,7 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- run.Main(
-			&cmd.Env{Stdout: wr, Stderr: os.Stderr, Dir: dir},
+			&cmd.Env{Stdout: wr, Stderr: &stderrBuf, Dir: dir},
 			[]string{
 				"-format=tapj",
 				"rspec",
@@ -40,23 +49,28 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 	err = tapjio.Decode(rd,
 		&tapjio.DecodingCallbacks{
 			OnSuite: func(event tapjio.SuiteEvent) error {
-				events = append(events, event)
+				tscript.Events = append(tscript.Events, event)
+				tscript.SuiteEvents = append(tscript.SuiteEvents, event)
 				return nil
 			},
 			OnTestBegin: func(event tapjio.TestStartedEvent) error {
-				events = append(events, event)
+				tscript.Events = append(tscript.Events, event)
+				tscript.TestStartedEvents = append(tscript.TestStartedEvents, event)
 				return nil
 			},
 			OnTest: func(event tapjio.TestEvent) error {
-				events = append(events, event)
+				tscript.Events = append(tscript.Events, event)
+				tscript.TestEvents = append(tscript.TestEvents, event)
 				return nil
 			},
 			OnTrace: func(event tapjio.TraceEvent) error {
-				events = append(events, event)
+				tscript.Events = append(tscript.Events, event)
+				tscript.TraceEvents = append(tscript.TraceEvents, event)
 				return nil
 			},
 			OnFinal: func(event tapjio.FinalEvent) error {
-				events = append(events, event)
+				tscript.Events = append(tscript.Events, event)
+				tscript.FinalEvents = append(tscript.FinalEvents, event)
 				return nil
 			},
 		})
@@ -65,46 +79,66 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 		err = <-errCh
 	}
 
-	stderr = stderrBuf.String()
+	tscript.Stderr = stderrBuf.String()
 	return
+}
+
+func findTestEvent(events []tapjio.TestEvent, label string) tapjio.TestEvent {
+	for _, event := range events {
+		if event.Label == label {
+			return event
+		}
+	}
+
+	return tapjio.TestEvent{}
 }
 
 func TestRuby(t *testing.T) {
 	baseDir := "fixtures/ruby"
-	var events []interface{}
 	var err error
-	var stderr string
+	var tscript transcript
 
-	events, stderr, err = runQa(t, path.Join(baseDir, "simple"))
+	tscript, err = runQa(t, path.Join(baseDir, "simple"))
 	if err != nil {
-		t.Fatal("qa failed here.", err, stderr)
+		t.Fatal("qa failed here.", err, tscript.Stderr)
 	}
 
-	if len(events) == 0 {
-		t.Fatal("No events for tests in", baseDir, stderr)
+	if len(tscript.Events) == 0 {
+		t.Fatal("No events for tests in", baseDir, tscript.Stderr)
 	}
 
-	finalEvent := events[len(events)-1]
+	testEventLabelsExpectingStandardFds := []string{
+		"test_library_minitest",
+		"test_library_test_unit",
+		"my library rspec",
+	}
+	for _, label := range testEventLabelsExpectingStandardFds {
+		testEvent := findTestEvent(tscript.TestEvents, label)
+		require.Contains(t, testEvent.Stdout, "Created MyLibrary [out]")
+		require.Contains(t, testEvent.Stderr, "Created MyLibrary [err]")
+	}
+
+	finalEvent := tscript.Events[len(tscript.Events)-1]
 	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
 		expect := tapjio.ResultTally{Total: 6, Pass: 6}
 
 		if expect != *fe.Counts {
-			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, events, stderr)
+			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, tscript.Events, tscript.Stderr)
 		}
 	} else {
-		t.Fatal("last event wasn't a final event.", events, stderr)
+		t.Fatal("last event wasn't a final event.", tscript.Events, tscript.Stderr)
 	}
 
-	events, stderr, err = runQa(t, path.Join(baseDir, "all-outcomes"))
+	tscript, err = runQa(t, path.Join(baseDir, "all-outcomes"))
 	if err == nil {
-		t.Fatal("qa should have failed.", stderr)
+		t.Fatal("qa should have failed.", tscript.Stderr)
 	}
 
-	if len(events) == 0 {
-		t.Fatal("No events for tests in", baseDir, stderr)
+	if len(tscript.Events) == 0 {
+		t.Fatal("No events for tests in", baseDir, tscript.Stderr)
 	}
 
-	finalEvent = events[len(events)-1]
+	finalEvent = tscript.Events[len(tscript.Events)-1]
 	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
 		expect := tapjio.ResultTally{
 			Total: 16,
@@ -115,9 +149,9 @@ func TestRuby(t *testing.T) {
 		}
 
 		if expect != *fe.Counts {
-			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, events, stderr)
+			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, tscript.Events, tscript.Stderr)
 		}
 	} else {
-		t.Fatal("last event wasn't a final event.", events, stderr)
+		t.Fatal("last event wasn't a final event.", tscript.Events, tscript.Stderr)
 	}
 }
