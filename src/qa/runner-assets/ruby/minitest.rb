@@ -54,14 +54,13 @@ class TapJRunner
         'rev'   => REVISION)
   end
 
-  #
-  # Process a test result.
-  #
-  def record(result)
-    @count += 1
-    @assertions += result.assertions
-
-    @results << result
+  def preview(result)
+    @test_start = ::Qa::Time.now_f
+    if Minitest.const_defined?(:Spec) && @result.class < Minitest::Spec
+      @test_label = result.name.sub(/^test_\d+_/, '').gsub('_', ' ')
+    else
+      @test_label = result.name
+    end
 
     if @previous_case != result.class
       emit(
@@ -71,18 +70,34 @@ class TapJRunner
           'level'   => 0)
     end
 
-    if Minitest.const_defined?(:Spec) && @result.class < Minitest::Spec
-      label = result.name.sub(/^test_\d+_/, '').gsub('_', ' ')
-    else
-      label = result.name
-    end
+    emit(
+        'type' => 'note',
+        'qa:type' => 'test:begin',
+        'qa:timestamp' => @test_start,
+        'qa:label' => @test_label,
+        'qa:filter' => "#{result.class}##{result.name}")
+
+    @previous_case = result.class
+
+    # set up stdout and stderr to be captured
+    @stdcom.reset!
+  end
+
+  #
+  # Process a test result.
+  #
+  def record(result)
+    @count += 1
+    @assertions += result.assertions
+
+    @results << result
 
     doc = {
       'type'        => 'test',
       'subtype'     => '',
       'filter'      => "#{result.class}##{result.name}",
       'file'        => result.method(result.name).source_location[0], # returns [file, line]
-      'label'       => "#{label}",
+      'label'       => @test_label,
       'time' => result.time
     }
 
@@ -108,8 +123,6 @@ class TapJRunner
 
     @trace.emit_stats
     emit(doc)
-
-    @previous_case = result.class
   end
 
   #
@@ -164,11 +177,24 @@ end
 
 engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   if opt.dry_run
-    Minitest.instance_eval do
+    Minitest::Runnable.class_eval do
       class <<self
         remove_method :run_one_method
-        def run_one_method(klass, method_name)
-          klass.new(method_name)
+        def run_one_method(klass, method_name, reporter)
+          test = klass.new(method_name)
+          reporter.preview test
+          reporter.record test
+        end
+      end
+    end
+  else
+    Minitest::Runnable.class_eval do
+      class <<self
+        remove_method :run_one_method
+        def run_one_method(klass, method_name, reporter)
+          test = klass.new(method_name)
+          reporter.preview test
+          reporter.record test.run
         end
       end
     end
