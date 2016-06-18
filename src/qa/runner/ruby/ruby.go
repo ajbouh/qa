@@ -124,7 +124,7 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 			traceEvents = append(traceEvents, trace)
 			return
 		},
-		OnTest: func(test tapjio.TestEvent) (err error) {
+		OnTest: func(test tapjio.TestEvent) error {
 			if cfg.SquashPolicy == SquashNothing ||
 				cfg.SquashPolicy == SquashByFile && (currentRunner == nil || currentRunner.file != test.File) ||
 				cfg.SquashPolicy == SquashAll && currentRunner == nil {
@@ -138,7 +138,7 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 				}
 			}
 			currentRunner.filters = append(currentRunner.filters, test.Filter)
-			return
+			return nil
 		},
 		OnEnd: func(reason error) error {
 			if currentRunner != nil {
