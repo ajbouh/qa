@@ -55,3 +55,7 @@ func (t *TraceWriter) TestStarted(event TestStartedEvent) error {
 func (t *TraceWriter) TestFinished(event TestEvent) error {
 	return nil
 }
+
+func (t *TraceWriter) End(reason error) error {
+	return nil
+}

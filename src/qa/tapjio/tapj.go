@@ -62,3 +62,7 @@ func (t *tapj) TestFinished(event TestEvent) error {
 func (t *tapj) SuiteFinished(event FinalEvent) error {
 	return t.encoder.Encode(event)
 }
+
+func (t *tapj) End(reason error) error {
+	return nil
+}

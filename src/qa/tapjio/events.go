@@ -196,6 +196,7 @@ type Visitor interface {
 	TestStarted(test TestStartedEvent) error
 	TestFinished(test TestEvent) error
 	SuiteFinished(final FinalEvent) error
+	End(reason error) error
 }
 
 type multiVisitor struct {
@@ -249,6 +250,15 @@ func MultiVisitor(visitors []Visitor) Visitor {
 			}
 			return nil
 		},
+		OnEnd: func(reason error) error {
+			for _, visitor := range visitors {
+				err := visitor.End(reason)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	}
 }
 
@@ -258,6 +268,7 @@ type DecodingCallbacks struct {
 	OnTest  func(event TestEvent) error
 	OnTrace func(event TraceEvent) error
 	OnFinal func(event FinalEvent) error
+	OnEnd func(reason error) error
 }
 
 func (s *DecodingCallbacks) SuiteStarted(event SuiteEvent) error {
@@ -294,6 +305,14 @@ func (s *DecodingCallbacks) SuiteFinished(event FinalEvent) error {
 	}
 
 	return s.OnFinal(event)
+}
+
+func (s *DecodingCallbacks) End(reason error) error {
+	if s.OnEnd == nil {
+		return nil
+	}
+
+	return s.OnEnd(reason)
 }
 
 func (self FinalEvent) Passed() bool {
@@ -337,6 +356,7 @@ func Decode(reader io.Reader, visitor Visitor) (err error) {
 
 	byteCountsByEventType := make(map[string]int)
 	countsByEventType := make(map[string]int)
+
 	for {
 		if err != nil {
 			break
@@ -409,6 +429,13 @@ func Decode(reader io.Reader, visitor Visitor) (err error) {
 			}
 			err = visitor.SuiteFinished(*fe)
 		}
+	}
+
+	// NOTE(adamb) An error from a visitor may override the error that
+	//     caused us to break out!
+	maybeErr := visitor.End(err)
+	if maybeErr != nil {
+		err = maybeErr
 	}
 
 	return

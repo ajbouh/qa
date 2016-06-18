@@ -140,12 +140,12 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 			currentRunner.filters = append(currentRunner.filters, test.Filter)
 			return
 		},
-		OnFinal: func(final tapjio.FinalEvent) (err error) {
+		OnEnd: func(reason error) error {
 			if currentRunner != nil {
 				testRunners = append(testRunners, *currentRunner)
 			}
 			wg.Done()
-			return
+			return nil
 		},
 	})
 
@@ -234,15 +234,20 @@ func (self rubyRunner) Run(env map[string]string, callbacks tapjio.DecodingCallb
 		return onTest(event)
 	}
 
-	onFinal := callbacks.OnFinal
-	callbacks.OnFinal = func(final tapjio.FinalEvent) error {
-		if onFinal == nil {
+	onEnd := callbacks.OnEnd
+	callbacks.OnEnd = func(reason error) error {
+		defer wg.Done()
+
+		if len(allowedFinishFilters) != 0 {
+			errMsg := fmt.Sprintf("Runner finished without emitting all expected tests. Never saw: %v", allowedFinishFilters)
+			return errors.New(errMsg)
+		}
+
+		if onEnd == nil {
 			return nil
 		}
 
-		err := onFinal(final)
-		wg.Done()
-		return err
+		return onEnd(reason)
 	}
 
 	self.ctx.request(

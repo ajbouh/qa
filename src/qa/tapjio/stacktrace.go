@@ -469,3 +469,7 @@ func (t *stacktraceEmitter) SuiteStarted(event SuiteEvent) error {
 func (t *stacktraceEmitter) TestFinished(event TestEvent) error {
 	return nil
 }
+
+func (t *stacktraceEmitter) End(reason error) error {
+	return nil
+}
