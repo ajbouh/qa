@@ -5,4 +5,8 @@ class TestUnitSkipTest < Test::Unit::TestCase
     sleep 1
     omit
   end
+
+  def test_duplicate_method_name
+    omit
+  end
 end

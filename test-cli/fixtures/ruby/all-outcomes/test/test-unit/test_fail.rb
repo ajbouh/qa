@@ -9,4 +9,9 @@ class TestUnitTestFail < MyTestCaseClass
     val = 1
     assert_equal(0, val)
   end
+
+  def test_duplicate_method_name
+    sleep 1
+    assert_equal(0, 1)
+  end
 end

@@ -98,8 +98,8 @@ module Test::Unit::UI::Tap
       doc = {
         'type'        => 'test',
         'label'       => clean_label(fault.test_name),
-        'filter'      => fault.method_name,
-        'file'        => @test.method(fault.method_name).source_location[0], # returns [file, line]
+        'filter'      => "#{@test.class.name}##{fault.method_name}",
+        'file'        => @test && @test.method(fault.method_name).source_location[0], # returns [file, line]
         'time'        => ::Qa::Time.now_f - @test_start
       }
       case fault
@@ -157,8 +157,8 @@ module Test::Unit::UI::Tap
         'type'        => 'test',
         'status'      => 'pass',
         'label'       => clean_label(test.name),
-        'filter'      => test.method_name,
-        'file'        => test.method(test.method_name).source_location[0], # returns [file, line]
+        'filter'      => "#{@test.class.name}##{test.method_name}",
+        'file'        => @test && @test.method(test.method_name).source_location[0], # returns [file, line]
         'time'        => ::Qa::Time.now_f - @test_start
       }
       @stdcom.drain!(doc)
@@ -208,7 +208,10 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   auto_runner.prepare
   args = ['--runner', 'tapj']
   unless tests.empty?
-    args.push("--name=/^(?:#{tests.map{|test|Regexp.escape(test)} * '|'})$/")
+    auto_runner.filters.push(lambda do |test|
+      key = "#{test.class.name}##{test.method_name}"
+      tests.member?(key)
+    end)
   end
   auto_runner.process_args(args)
   runner_options = auto_runner.runner_options

@@ -104,11 +104,11 @@ func testRunner(t *testing.T, baseDir string) {
 	finalEvent = events[len(events)-1]
 	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
 		expect := tapjio.ResultTally{
-			Total: 12,
-			Pass:  3,
-			Fail:  3,
-			Todo:  3,
-			Error: 3,
+			Total: 16,
+			Pass:  4,
+			Fail:  4,
+			Todo:  4,
+			Error: 4,
 		}
 
 		if expect != *fe.Counts {

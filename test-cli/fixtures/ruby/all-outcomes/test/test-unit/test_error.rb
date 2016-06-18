@@ -7,4 +7,9 @@ class TestUnitTestError < Test::Unit::TestCase
     longVariableNameToo = "some string value"
     raise "Always an error"
   end
+
+  def test_duplicate_method_name
+    sleep 1
+    raise "Always an error"
+  end
 end
