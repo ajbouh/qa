@@ -12,8 +12,9 @@ import (
 	"qa/tapjio"
 )
 
-type testResult struct {
-	testEvent tapjio.TestEvent
+type testEventUnion struct {
+	testBegan *tapjio.TestStartedEvent
+	testEvent *tapjio.TestEvent
 	testError error
 }
 
@@ -83,8 +84,7 @@ func (self *testSuiteRunner) Run(
 
 	var abort = false
 	var traceChan = make(chan tapjio.TraceEvent, numWorkers)
-	var testResultChan = make(chan testResult, numWorkers)
-	var testStartChan = make(chan tapjio.TestStartedEvent, numWorkers)
+	var testChan = make(chan testEventUnion, numWorkers)
 
 	var awaitJobs sync.WaitGroup
 	awaitJobs.Add(numWorkers)
@@ -96,7 +96,7 @@ func (self *testSuiteRunner) Run(
 			for testRunner := range testRunnerChan {
 				if abort {
 					for i := testRunner.TestCount(); i > 0; i-- {
-						testResultChan <- testResult{testError: errors.New("already aborted")}
+						testChan <- testEventUnion{testError: errors.New("already aborted")}
 					}
 				} else {
 					var awaitRun sync.WaitGroup
@@ -105,18 +105,18 @@ func (self *testSuiteRunner) Run(
 						env,
 						tapjio.DecodingCallbacks{
 							OnTestBegin: func(test tapjio.TestStartedEvent) error {
-								testStartChan <- test
+								testChan <- testEventUnion{&test, nil, nil}
 								return nil
 							},
 							OnTest: func(test tapjio.TestEvent) error {
-								testResultChan <- testResult{test, nil}
+								testChan <- testEventUnion{nil, &test, nil}
 								return nil
 							},
 							OnTrace: func(trace tapjio.TraceEvent) error {
 								traceChan <- trace
 								return nil
 							},
-							OnFinal: func(final tapjio.FinalEvent) error {
+							OnEnd: func(reason error) error {
 								awaitRun.Done()
 								return nil
 							},
@@ -144,28 +144,31 @@ func (self *testSuiteRunner) Run(
 			if err != nil {
 				return
 			}
-		case testStart := <-testStartChan:
-			err = visitor.TestStarted(testStart)
-			if err != nil {
-				return
-			}
-		case testResult := <-testResultChan:
-			err = testResult.testError
-			if err == nil {
-				test := testResult.testEvent
-				final.Counts.Increment(test.Status)
-
-				err = visitor.TestFinished(test)
+		case testEventUnion := <-testChan:
+			begin := testEventUnion.testBegan
+			if begin != nil {
+				err = visitor.TestStarted(*begin)
 				if err != nil {
 					return
 				}
-			}
+			} else {
+				err = testEventUnion.testError
+				if err == nil {
+					test := testEventUnion.testEvent
+					final.Counts.Increment(test.Status)
 
-			if err != nil {
-				abort = true
-				final.Counts.Increment(tapjio.Error)
-				fmt.Fprintln(os.Stderr, "Error:", err)
-				return
+					err = visitor.TestFinished(*test)
+					if err != nil {
+						return
+					}
+				}
+
+				if err != nil {
+					abort = true
+					final.Counts.Increment(tapjio.Error)
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					return
+				}
 			}
 		}
 	}
