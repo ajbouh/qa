@@ -5,10 +5,11 @@ package run
 import (
 	// "bytes"
 	"encoding/json"
+	"path/filepath"
 	"flag"
 	"fmt"
 	"errors"
-	// "io"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -39,10 +40,7 @@ func maybeJoin(p string, dir string) string {
 	return p
 }
 
-func Main(args []string) error {
-	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Cur: 999999999, Max: 999999999}); err != nil {
-		log.Fatal("Could not enable core dumps: ", err)
-	}
+func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	auditDir := flags.String("audit-dir", "", "Directory to save TAP-J, JSON, SVG")
@@ -84,9 +82,9 @@ func Main(args []string) error {
 
 	switch *format {
 	case "tapj":
-		visitors = append(visitors, tapjio.NewTapjEmitter(os.Stdout))
+		visitors = append(visitors, tapjio.NewTapjEmitter(stdout))
 	case "pretty":
-		visitors = append(visitors, reporting.NewPretty(os.Stdout, *jobs))
+		visitors = append(visitors, reporting.NewPretty(stdout, *jobs))
 	default:
 		return errors.New(fmt.Sprintf("Unknown format: %v", *format))
 	}
@@ -229,7 +227,7 @@ func Main(args []string) error {
 	go func(c chan os.Signal) {
 		// Wait for signal
 		sig := <-c
-		fmt.Fprintln(os.Stderr, "Got signal:", sig)
+		fmt.Fprintln(stderr, "Got signal:", sig)
 		srv.Close()
 		os.Exit(1)
 	}(sigc)
@@ -263,13 +261,25 @@ func Main(args []string) error {
 		var files []string
 
 		for _, glob := range strings.Split(globStr, ":") {
+			relative := !filepath.IsAbs(glob)
+			if relative {
+				glob = filepath.Join(dir, glob)
+			}
+
 			globFiles, err := zglob.Glob(glob)
-			fmt.Fprintf(os.Stderr, "Resolved %v to %v\n", glob, globFiles)
+			fmt.Fprintf(stderr, "Resolved %v to %v\n", glob, globFiles)
 			if err != nil {
 				return err
 			}
 
-			files = append(files, globFiles...)
+			if relative {
+				trimPrefix := fmt.Sprintf("%s%c", dir, os.PathSeparator)
+				for _, file := range globFiles {
+					files = append(files, strings.TrimPrefix(file, trimPrefix))
+				}
+			} else {
+				files = append(files, globFiles...)
+			}
 		}
 
 		passthrough := map[string](interface{}) {
@@ -279,7 +289,7 @@ func Main(args []string) error {
 			"sampleStack": *sampleStack,
 		}
 
-		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, seed, files)
+		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, dir, seed, files)
 		if err != nil {
 			return err
 		}
@@ -305,10 +315,10 @@ func Main(args []string) error {
 
 	final, err = suite.Run(workerEnvs, visitor)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error in NewTestSuiteRunner", err)
+		fmt.Fprintln(stderr, "Error in NewTestSuiteRunner", err)
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if len(exitError.Stderr) > 0 {
-				fmt.Fprintln(os.Stderr, string(exitError.Stderr))
+				fmt.Fprintln(stderr, string(exitError.Stderr))
 			}
 		}
 

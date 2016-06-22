@@ -22,6 +22,7 @@ const (
 
 type ContextConfig struct {
 	Seed              int
+	Dir               string
 	Rubylib           []string
   RunnerAssetName   string
 	TraceProbes       []string
@@ -78,6 +79,7 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 	// args = append([]string{"-ex=set follow-fork-mode child", "-ex=r", "--args", "ruby"}, args...)
 	// cmd := exec.Command("gdb", args...)
 
+	cmd.Dir = cfg.Dir
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stderr

@@ -4,8 +4,10 @@ package qa_test
 
 import (
 	"bytes"
-	"os/exec"
+	"io"
 	"path"
+	"os"
+	"qa/cmd/run"
 	"qa/tapjio"
 	"testing"
 )
@@ -14,27 +16,29 @@ import (
 func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err error) {
 	events = make([]interface{}, 0)
 
-	cmd := exec.Command("qa",
-		"run",
-		"-format=tapj",
-		"rspec:spec/**/*_spec.rb",
-		"minitest:test/minitest/**/test*.rb",
-		"test-unit:test/test-unit/**/test*.rb")
-	cmd.Dir = dir
 	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
 
-	stdout, stdoutErr := cmd.StdoutPipe()
-	if stdoutErr != nil {
-		err = stdoutErr
-		return
-	}
+	rd, wr := io.Pipe()
+	defer rd.Close()
+	defer wr.Close()
 
-	if err = cmd.Start(); err != nil {
-		return
-	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run.Main(
+			wr,
+			os.Stderr,
+			dir,
+			[]string{
+				"-format=tapj",
+				"rspec:spec/**/*_spec.rb",
+				"minitest:test/minitest/**/test*.rb",
+				"test-unit:test/test-unit/**/test*.rb",
+			})
 
-	err = tapjio.Decode(stdout,
+		wr.Close()
+	}()
+
+	err = tapjio.Decode(rd,
 		&tapjio.DecodingCallbacks{
 			OnSuite: func(event tapjio.SuiteEvent) error {
 				events = append(events, event)
@@ -58,9 +62,8 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 			},
 		})
 
-	cmdErr := cmd.Wait()
 	if err == nil {
-		err = cmdErr
+		err = <-errCh
 	}
 
 	stderr = stderrBuf.String()

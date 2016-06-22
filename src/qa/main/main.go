@@ -15,7 +15,10 @@ func main() {
 	var err error
 	switch command {
 	case "run":
-		err = run.Main(os.Args[2:])
+		dir, err := os.Getwd()
+		if err == nil {
+			err = run.Main(os.Stdout, os.Stderr, dir, os.Args[2:])
+		}
 	case "flamegraph":
 		err = flamegraph.Main(os.Args[2:])
 	case "stackcollapse":
