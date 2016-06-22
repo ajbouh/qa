@@ -58,6 +58,8 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 	evalAfterFork := flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins")
 	sampleStack := flags.Bool("sample-stack", false, "Enable stack sampling")
 
+	warmup := flags.Bool("warmup", true, "Try to warm up various worker caches")
+
 	err := flags.Parse(args)
 	if err != nil {
 		return err
@@ -283,6 +285,7 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 		}
 
 		passthrough := map[string](interface{}) {
+			"warmup": *warmup,
 			"errorsCaptureLocals": *errorsCaptureLocals,
 			"captureStandardFds": *captureStandardFds,
 			"evalAfterFork": *evalAfterFork,

@@ -1196,20 +1196,22 @@ class ::Qa::TestEngine
     # Delegate prefork actions.
     @prefork.call(initial_files)
 
-    # Autoload constants.
-    ::Qa::Warmup::Autoload.warmup
-
     conserved = ::Qa::ConservedInstancesSet.new
 
-    # Once we've warmed up, we don't want more SchemaCache instances created. If we see more,
-    # then there's something wrong with our warmup (or resume). Add the class to our conserved
-    # set.
-    if defined?(ActiveRecord::ConnectionAdapters::SchemaCache)
-      conserved.add_class(ActiveRecord::ConnectionAdapters::SchemaCache)
-    end
+    # Autoload constants.
+    if passthrough['warmup']
+      ::Qa::Warmup::Autoload.warmup
 
-    # Warm up each worker environment.
-    cache = ::Qa::Warmup::RailsActiveRecord.warmup_envs(worker_envs)
+      # Once we've warmed up, we don't want more SchemaCache instances created. If we see more,
+      # then there's something wrong with our warmup (or resume). Add the class to our conserved
+      # set.
+      if defined?(ActiveRecord::ConnectionAdapters::SchemaCache)
+        conserved.add_class(ActiveRecord::ConnectionAdapters::SchemaCache)
+      end
+
+      # Warm up each worker environment.
+      cache = ::Qa::Warmup::RailsActiveRecord.warmup_envs(worker_envs)
+    end
 
     # From here on, we don't expect to see new instances for any of our conserved classes.
     conserved.remember!
@@ -1261,14 +1263,15 @@ class ::Qa::TestEngine
     socket.each_line do |line|
       env, args = JSON.parse(line)
 
-      accept_client(cache, env, args, eval_after_fork, conserved, trace_probes, trace_events)
+      resume = passthrough['warmup']
+      accept_client(cache, env, args, eval_after_fork, resume, conserved, trace_probes, trace_events)
 
       # Only pass trace_events along to the first client.
       trace_events.clear
     end
   end
 
-  def accept_client(cache, env, args, eval_after_fork, conserved, trace_probes, trace_events)
+  def accept_client(cache, env, args, eval_after_fork, resume, conserved, trace_probes, trace_events)
     p = Process.fork do
       opt = ::Qa::ClientOptionParser.new
       tests = opt.parse(args)
@@ -1291,7 +1294,9 @@ class ::Qa::TestEngine
       end
 
       unless opt.dry_run
-        ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
+        if resume
+          ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
+        end
 
         eval(eval_after_fork) unless eval_after_fork.empty?
       end
