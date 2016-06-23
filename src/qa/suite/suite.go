@@ -13,6 +13,7 @@ import (
 )
 
 type testEventUnion struct {
+	trace     *tapjio.TraceEvent
 	testBegan *tapjio.TestStartedEvent
 	testEvent *tapjio.TestEvent
 	testError error
@@ -83,7 +84,6 @@ func (self *testSuiteRunner) Run(
 	}()
 
 	var abort = false
-	var traceChan = make(chan tapjio.TraceEvent, numWorkers)
 	var testChan = make(chan testEventUnion, numWorkers)
 
 	var awaitJobs sync.WaitGroup
@@ -105,15 +105,15 @@ func (self *testSuiteRunner) Run(
 						env,
 						tapjio.DecodingCallbacks{
 							OnTestBegin: func(test tapjio.TestStartedEvent) error {
-								testChan <- testEventUnion{&test, nil, nil}
+								testChan <- testEventUnion{nil, &test, nil, nil}
 								return nil
 							},
 							OnTest: func(test tapjio.TestEvent) error {
-								testChan <- testEventUnion{nil, &test, nil}
+								testChan <- testEventUnion{nil, nil, &test, nil}
 								return nil
 							},
 							OnTrace: func(trace tapjio.TraceEvent) error {
-								traceChan <- trace
+								testChan <- testEventUnion{&trace, nil, nil, nil}
 								return nil
 							},
 							OnEnd: func(reason error) error {
@@ -129,47 +129,44 @@ func (self *testSuiteRunner) Run(
 
 	go func() {
 		awaitJobs.Wait()
-		close(traceChan)
+		close(testChan)
 	}()
 
-	for traceChan != nil {
-		select {
-		case trace, ok := <-traceChan:
-			if !ok {
-				traceChan = nil
-				continue
-			}
-
-			err = visitor.TraceEvent(trace)
+	for testEventUnion := range testChan {
+		if testEventUnion.trace != nil {
+			err = visitor.TraceEvent(*testEventUnion.trace)
 			if err != nil {
 				return
 			}
-		case testEventUnion := <-testChan:
-			begin := testEventUnion.testBegan
-			if begin != nil {
-				err = visitor.TestStarted(*begin)
-				if err != nil {
-					return
-				}
-			} else {
-				err = testEventUnion.testError
-				if err == nil {
-					test := testEventUnion.testEvent
-					final.Counts.Increment(test.Status)
+			continue
+		}
 
-					err = visitor.TestFinished(*test)
-					if err != nil {
-						return
-					}
-				}
-
-				if err != nil {
-					abort = true
-					final.Counts.Increment(tapjio.Error)
-					fmt.Fprintln(os.Stderr, "Error:", err)
-					return
-				}
+		begin := testEventUnion.testBegan
+		if begin != nil {
+			err = visitor.TestStarted(*begin)
+			if err != nil {
+				return
 			}
+			continue
+		}
+
+		err = testEventUnion.testError
+		if err == nil {
+			test := testEventUnion.testEvent
+			final.Counts.Increment(test.Status)
+
+			err = visitor.TestFinished(*test)
+			if err != nil {
+				return
+			}
+			continue
+		}
+
+		if err != nil {
+			abort = true
+			final.Counts.Increment(tapjio.Error)
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			return
 		}
 	}
 
