@@ -104,7 +104,7 @@ type TestStartedEvent struct {
 	Subtype   string  `json:"qa:subtype"`
 	Filter    string  `json:"qa:filter"`
 
-	Cases     []CaseEvent
+	Cases     []CaseEvent `json:"-"`
 }
 
 func newTestStartedEvent() *TestStartedEvent {
@@ -115,7 +115,6 @@ func newTestStartedEvent() *TestStartedEvent {
 
 type TestEvent struct {
 	Type      string  `json:"type"`
-	Timestamp float64 `json:"timestamp"`
 	Time      float64 `json:"time"`
 	Label     string  `json:"label"`
 	Subtype   string  `json:"subtype"`
@@ -126,7 +125,7 @@ type TestEvent struct {
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
 
-	Cases []CaseEvent
+	Cases []CaseEvent `json:"-"`
 
 	Exception *TestException `json:"exception,omitempty"`
 }
@@ -162,9 +161,9 @@ type FinalEvent struct {
 	Time   float64        `json:"time"`
 	Counts *ResultTally    `json:"counts"`
 	Stats  map[string]int `json:"qa:stats,omitempty"`
-	MetaStats map[string]int
+	MetaStats map[string]int `json:"-"`
 
-	Suite  *SuiteEvent
+	Suite  *SuiteEvent `json:"-"`
 }
 
 func NewFinalEvent(suite *SuiteEvent) *FinalEvent {
