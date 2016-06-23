@@ -146,7 +146,6 @@ module Test::Unit::UI::Tap
 
       @stdcom.drain!(doc)
 
-
       @trace.emit_stats
       emit doc
       @already_outputted = true
@@ -204,9 +203,94 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
     Test::Unit::TestCase.class_eval do
       remove_method :run_test
       def run_test; end
-      def run_setup; end
-      def run_teardown; end
+
+      def run_setup
+        yield if block_given?
+      end
+
       def run_cleanup; end
+      def run_teardown; end
+    end
+
+    if defined?(::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit)
+      # Modified from https://github.com/rails/rails/blob/3-2-stable/activesupport/lib/active_support/testing/setup_and_teardown.rb#L61
+      ::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit.module_eval do
+        remove_method :run
+
+        # This redefinition is unfortunate but test/unit shows us no alternative.
+        # Doubly unfortunate: hax to support Mocha's hax.
+        def run(result)
+          return if @method_name.to_s == "default_test"
+
+          @_result = result
+          @internal_data.test_started
+
+          yield(Test::Unit::TestCase::STARTED, name)
+          yield(Test::Unit::TestCase::STARTED_OBJECT, self)
+
+          @internal_data.test_finished
+          result.add_run
+          yield(Test::Unit::TestCase::FINISHED, name)
+          yield(Test::Unit::TestCase::FINISHED_OBJECT, self)
+        end
+      end
+    end
+  else
+    if defined?(::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit)
+      # Modified from https://github.com/rails/rails/blob/3-2-stable/activesupport/lib/active_support/testing/setup_and_teardown.rb#L61
+      ::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit.module_eval do
+        remove_method :run
+
+        # This redefinition is unfortunate but test/unit shows us no alternative.
+        # Doubly unfortunate: hax to support Mocha's hax.
+        def run(result)
+          return if @method_name.to_s == "default_test"
+
+          @_result = result
+          @internal_data.test_started
+
+          mocha_counter = retrieve_mocha_counter(self, result)
+          yield(Test::Unit::TestCase::STARTED, name)
+          yield(Test::Unit::TestCase::STARTED_OBJECT, self)
+
+          begin
+            begin
+              run_callbacks :setup do
+                setup
+                __send__(@method_name)
+                mocha_verify(mocha_counter) if mocha_counter
+              end
+            rescue Mocha::ExpectationError => e
+              add_failure(e.message, e.backtrace)
+            rescue Test::Unit::AssertionFailedError => e
+              add_failure(e.message, e.backtrace)
+            rescue Exception => e
+              raise if PASSTHROUGH_EXCEPTIONS.include?(e.class)
+              add_error(e)
+            ensure
+              begin
+                teardown
+                run_callbacks :teardown
+              rescue Mocha::ExpectationError => e
+                add_failure(e.message, e.backtrace)
+              rescue Test::Unit::AssertionFailedError => e
+                add_failure(e.message, e.backtrace)
+              rescue Exception => e
+                raise if PASSTHROUGH_EXCEPTIONS.include?(e.class)
+                add_error(e)
+              end
+            end
+          ensure
+            mocha_teardown if mocha_counter
+          end
+
+          result.add_run
+          @internal_data.test_finished
+
+          yield(Test::Unit::TestCase::FINISHED, name)
+          yield(Test::Unit::TestCase::FINISHED_OBJECT, self)
+        end
+      end
     end
   end
 
