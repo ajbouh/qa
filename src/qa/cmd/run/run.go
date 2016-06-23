@@ -53,6 +53,10 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 	format := flags.String("format", "pretty", "Set output format")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "Set number of jobs")
 
+	showUpdatingSummary := flags.Bool("pretty-overwrite", true, "Pretty reporter shows live updating summary")
+	elidePass := flags.Bool("pretty-quiet-pass", true, "Pretty reporter elides passing tests without (std)output")
+	elideOmit := flags.Bool("pretty-quiet-omit", true, "Pretty reporter elides omitted tests without (std)output")
+
 	errorsCaptureLocals := flags.String("errors-capture-locals", "false", "Use runtime debug API to capture locals from stack when raising errors")
 	captureStandardFds := flags.Bool("capture-standard-fds", true, "Capture stdout and stderr")
 	evalAfterFork := flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins")
@@ -86,7 +90,11 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 	case "tapj":
 		visitors = append(visitors, tapjio.NewTapjEmitter(stdout))
 	case "pretty":
-		visitors = append(visitors, reporting.NewPretty(stdout, *jobs))
+		pretty := reporting.NewPretty(stdout, *jobs)
+		pretty.ShowUpdatingSummary = *showUpdatingSummary
+		pretty.ElideQuietPass = *elidePass
+		pretty.ElideQuietOmit = *elideOmit
+		visitors = append(visitors, pretty)
 	default:
 		return errors.New(fmt.Sprintf("Unknown format: %v", *format))
 	}

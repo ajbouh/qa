@@ -14,6 +14,10 @@ import (
 )
 
 type Pretty struct {
+	ElideQuietPass     bool
+	ElideQuietOmit     bool
+	ShowUpdatingSummary   bool
+
 	writer        io.Writer
 	jobs          int
 	lastCase      *tapjio.CaseEvent
@@ -99,6 +103,10 @@ func (self *Pretty) SuiteStarted(suite tapjio.SuiteEvent) error {
 }
 
 func (self *Pretty) clearSummary() {
+	if !self.ShowUpdatingSummary {
+		return
+	}
+
 	n := 2 + len(self.pending)
 	for i := 0; i < n; i++ {
 		// Move up, move to beginning of line, clear line
@@ -107,6 +115,10 @@ func (self *Pretty) clearSummary() {
 }
 
 func (self *Pretty) writeSummary() {
+	if !self.ShowUpdatingSummary {
+		return
+	}
+
 	numPending := len(self.pending)
 
 	tallySummaryPrefix := ""
@@ -146,11 +158,13 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 
 	label := tapjio.TestLabel(test.Label, test.Cases)
 	self.clearSummary()
+
 	delete(self.pending, test.Filter)
 	defer self.writeSummary()
 
-	if (test.Status == tapjio.Pass || test.Status == tapjio.Omit) &&
-		test.Stdout == "" && test.Stderr == "" {
+	if ((self.ElideQuietPass && test.Status == tapjio.Pass) ||
+			(self.ElideQuietOmit && test.Status == tapjio.Omit)) &&
+			test.Stdout == "" && test.Stderr == "" {
 		return nil
 	}
 
