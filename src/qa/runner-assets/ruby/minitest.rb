@@ -133,6 +133,9 @@ class TapJRunner
     aggregate.default = [] # dumb. group_by should provide this
 
     corrected_time = ::Qa::Time.now_f - @suite_start_time
+
+    @trace.emit_final_stats
+
     emit(
         'type' => 'final',
         'time' => corrected_time,

@@ -47,6 +47,8 @@ module Test::Unit::UI::Tap
     end
 
     def tapout_after_suite(elapsed_time)
+      @trace.emit_final_stats
+
       emit(
           'type' => 'final',
           'time' => elapsed_time,

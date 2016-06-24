@@ -1183,7 +1183,6 @@ class ::Qa::TestEngine
     trace_events = []
     qa_trace = ::Qa::Trace.new(Process.pid) { |e| trace_events.push(e) }
     trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
-    qa_trace.start
 
     socket = ::Qa::ClientSocket.connect(args.shift)
 
@@ -1192,6 +1191,11 @@ class ::Qa::TestEngine
     initial_config = JSON.parse(initial_json)
     worker_envs, initial_files = initial_config['workerEnvs'], initial_config['files']
     passthrough = initial_config['passthrough']
+
+    if passthrough['sampleStack']
+      Qa::Trace.enable_stackprof!
+    end
+    qa_trace.start
 
     # Delegate prefork actions.
     @prefork.call(initial_files)
@@ -1228,10 +1232,6 @@ class ::Qa::TestEngine
       Qa::Stdcom.enable!
     else
       Qa::Stdcom.disable!
-    end
-
-    if passthrough['sampleStack']
-      Qa::Trace.enable_stackprof!
     end
 
     case passthrough['errorsCaptureLocals'].to_s
