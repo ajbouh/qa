@@ -1,8 +1,8 @@
 package analysis
 
 import (
-	"sort"
 	"qa/tapjio"
+	"sort"
 )
 
 type TimeCop struct {
@@ -19,10 +19,11 @@ type TimeCop struct {
 	SlowestFastPassingDuration float64
 	negativeOutcomes           []outcome
 
-	MaxResults             int
+	MaxResults int
 }
 
 type ByOutcomeDuration []outcome
+
 func (a ByOutcomeDuration) Len() int           { return len(a) }
 func (a ByOutcomeDuration) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByOutcomeDuration) Less(i, j int) bool { return a[i].Duration < a[j].Duration }

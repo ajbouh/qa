@@ -25,7 +25,7 @@ const (
 )
 
 type BaseEvent struct {
-	Type string `json:"type"`
+	Type   string  `json:"type"`
 	QaType *string `json:"qa:type,omitempty"`
 }
 
@@ -38,7 +38,7 @@ type SuiteEvent struct {
 }
 
 func NewSuiteEvent(startTime time.Time, count int, seed int) *SuiteEvent {
-	return &SuiteEvent {
+	return &SuiteEvent{
 		Type:  "suite",
 		Start: startTime.Format("2006-01-02 15:04:05"),
 		Count: count,
@@ -65,8 +65,8 @@ type TraceData struct {
 }
 
 type TraceEvent struct {
-	Type  string     `json:"type"`
-	Data  *TraceData `json:"trace"`
+	Type string     `json:"type"`
+	Data *TraceData `json:"trace"`
 }
 
 type TestException struct {
@@ -104,7 +104,7 @@ type TestStartedEvent struct {
 	Subtype   string  `json:"qa:subtype"`
 	Filter    string  `json:"qa:filter"`
 
-	Cases     []CaseEvent `json:"-"`
+	Cases []CaseEvent `json:"-"`
 }
 
 func newTestStartedEvent() *TestStartedEvent {
@@ -114,13 +114,13 @@ func newTestStartedEvent() *TestStartedEvent {
 }
 
 type TestEvent struct {
-	Type      string  `json:"type"`
-	Time      float64 `json:"time"`
-	Label     string  `json:"label"`
-	Subtype   string  `json:"subtype"`
-	Status    Status  `json:"status"`
-	Filter    string  `json:"filter,omitempty"`
-	File      string  `json:"file,omitempty"`
+	Type    string  `json:"type"`
+	Time    float64 `json:"time"`
+	Label   string  `json:"label"`
+	Subtype string  `json:"subtype"`
+	Status  Status  `json:"status"`
+	Filter  string  `json:"filter,omitempty"`
+	File    string  `json:"file,omitempty"`
 
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
@@ -157,22 +157,22 @@ func (r *ResultTally) Increment(status Status) {
 }
 
 type FinalEvent struct {
-	Type   string         `json:"type"`
-	Time   float64        `json:"time"`
-	Counts *ResultTally    `json:"counts"`
-	Stats  map[string]int `json:"qa:stats,omitempty"`
+	Type      string         `json:"type"`
+	Time      float64        `json:"time"`
+	Counts    *ResultTally   `json:"counts"`
+	Stats     map[string]int `json:"qa:stats,omitempty"`
 	MetaStats map[string]int `json:"-"`
 
-	Suite  *SuiteEvent `json:"-"`
+	Suite *SuiteEvent `json:"-"`
 }
 
 func NewFinalEvent(suite *SuiteEvent) *FinalEvent {
 	return &FinalEvent{
-		Type:  "final", // TODO(adamb) Figure out how to make Type implied.
-		Suite: suite,
-		Stats: make(map[string]int),
+		Type:      "final", // TODO(adamb) Figure out how to make Type implied.
+		Suite:     suite,
+		Stats:     make(map[string]int),
 		MetaStats: make(map[string]int),
-		Counts: &ResultTally{},
+		Counts:    &ResultTally{},
 	}
 }
 
@@ -183,7 +183,6 @@ func (f *FinalEvent) IncrementStat(name string, amount int) {
 	}
 	f.Stats[name] = i + amount
 }
-
 
 type Decoder struct {
 	reader io.Reader
@@ -262,12 +261,12 @@ func MultiVisitor(visitors []Visitor) Visitor {
 }
 
 type DecodingCallbacks struct {
-	OnSuite func(event SuiteEvent) error
+	OnSuite     func(event SuiteEvent) error
 	OnTestBegin func(event TestStartedEvent) error
-	OnTest  func(event TestEvent) error
-	OnTrace func(event TraceEvent) error
-	OnFinal func(event FinalEvent) error
-	OnEnd func(reason error) error
+	OnTest      func(event TestEvent) error
+	OnTrace     func(event TraceEvent) error
+	OnFinal     func(event FinalEvent) error
+	OnEnd       func(reason error) error
 }
 
 func (s *DecodingCallbacks) SuiteStarted(event SuiteEvent) error {
@@ -421,10 +420,10 @@ func Decode(reader io.Reader, visitor Visitor) (err error) {
 			incrementValue(countsByEventType, fe.Type, 1)
 			fe.Suite = currentSuite
 			for eventType, byteCount := range byteCountsByEventType {
-				fe.MetaStats[eventType + "/bytes"] = byteCount
+				fe.MetaStats[eventType+"/bytes"] = byteCount
 			}
 			for eventType, count := range countsByEventType {
-				fe.MetaStats[eventType + "/count"] = count
+				fe.MetaStats[eventType+"/count"] = count
 			}
 			err = visitor.SuiteFinished(*fe)
 		}

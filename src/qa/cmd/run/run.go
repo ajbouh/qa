@@ -5,10 +5,9 @@ package run
 import (
 	// "bytes"
 	"encoding/json"
-	"path/filepath"
+	"errors"
 	"flag"
 	"fmt"
-	"errors"
 	"io"
 	"io/ioutil"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -150,7 +150,7 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 					"--minwidth=2",
 				}
 				if *savePalette != "" {
-					options = append(options, "--cp", "--palfile=" + *savePalette)
+					options = append(options, "--cp", "--palfile="+*savePalette)
 				}
 
 				// There may be nothing to do if we didn't see any stacktrace data!
@@ -192,7 +192,7 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 					"--inverted",
 				}
 				if *savePalette != "" {
-					options = append(options, "--cp", "--palfile=" + *savePalette)
+					options = append(options, "--cp", "--palfile="+*savePalette)
 				}
 
 				// There may be nothing to do if we didn't see any stacktrace data!
@@ -292,12 +292,12 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 			}
 		}
 
-		passthrough := map[string](interface{}) {
-			"warmup": *warmup,
+		passthrough := map[string](interface{}){
+			"warmup":              *warmup,
 			"errorsCaptureLocals": *errorsCaptureLocals,
-			"captureStandardFds": *captureStandardFds,
-			"evalAfterFork": *evalAfterFork,
-			"sampleStack": *sampleStack,
+			"captureStandardFds":  *captureStandardFds,
+			"evalAfterFork":       *evalAfterFork,
+			"sampleStack":         *sampleStack,
 		}
 
 		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, dir, seed, files)

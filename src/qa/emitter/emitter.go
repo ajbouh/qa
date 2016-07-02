@@ -37,12 +37,12 @@ func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitte
 		files []string) (Emitter, error) {
 
 		config := &ruby.ContextConfig{
-			Dir:             dir,
-			Seed:            seed,
-			Rubylib:         []string{"spec", "lib", "test"},
-			RunnerAssetName: runnerAssetName,
-			TraceProbes:     rubyTraceProbes,
-			SquashPolicy:    policy,
+			Dir:               dir,
+			Seed:              seed,
+			Rubylib:           []string{"spec", "lib", "test"},
+			RunnerAssetName:   runnerAssetName,
+			TraceProbes:       rubyTraceProbes,
+			SquashPolicy:      policy,
 			PassthroughConfig: passthroughConfig,
 		}
 
@@ -56,13 +56,13 @@ func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitte
 }
 
 var starters = map[string]emitterStarter{
-	"rspec": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashByFile),
-	"rspec-squashall": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashAll),
-	"rspec-pendantic": rubyEmitterStarter("ruby/rspec.rb", ruby.SquashNothing),
-	"minitest": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashByFile),
-	"minitest-squashall": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashAll),
-	"minitest-pendantic": rubyEmitterStarter("ruby/minitest.rb", ruby.SquashNothing),
-	"test-unit": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashByFile),
+	"rspec":               rubyEmitterStarter("ruby/rspec.rb", ruby.SquashByFile),
+	"rspec-squashall":     rubyEmitterStarter("ruby/rspec.rb", ruby.SquashAll),
+	"rspec-pendantic":     rubyEmitterStarter("ruby/rspec.rb", ruby.SquashNothing),
+	"minitest":            rubyEmitterStarter("ruby/minitest.rb", ruby.SquashByFile),
+	"minitest-squashall":  rubyEmitterStarter("ruby/minitest.rb", ruby.SquashAll),
+	"minitest-pendantic":  rubyEmitterStarter("ruby/minitest.rb", ruby.SquashNothing),
+	"test-unit":           rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashByFile),
 	"test-unit-squashall": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashAll),
 	"test-unit-pendantic": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashNothing),
 }

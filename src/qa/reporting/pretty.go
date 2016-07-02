@@ -14,9 +14,9 @@ import (
 )
 
 type Pretty struct {
-	ElideQuietPass     bool
-	ElideQuietOmit     bool
-	ShowUpdatingSummary   bool
+	ElideQuietPass      bool
+	ElideQuietOmit      bool
+	ShowUpdatingSummary bool
 
 	writer        io.Writer
 	jobs          int
@@ -28,29 +28,29 @@ type Pretty struct {
 	timeCop       *analysis.TimeCop
 	tally         *tapjio.ResultTally
 
-	pending       map[string]string
+	pending map[string]string
 
-	boldYellow    func(a ...interface{}) string
-	cyan          func(a ...interface{}) string
-	green         func(a ...interface{}) string
-	red           func(a ...interface{}) string
-	magenta       func(a ...interface{}) string
-	bold          func(a ...interface{}) string
+	boldYellow func(a ...interface{}) string
+	cyan       func(a ...interface{}) string
+	green      func(a ...interface{}) string
+	red        func(a ...interface{}) string
+	magenta    func(a ...interface{}) string
+	bold       func(a ...interface{}) string
 }
 
 func NewPretty(writer io.Writer, jobs int) *Pretty {
-	return &Pretty {
-		writer: writer,
-		jobs: jobs,
-		pending: make(map[string]string),
-		timeCop: &analysis.TimeCop{MaxResults: 10},
-		tally: &tapjio.ResultTally{},
+	return &Pretty{
+		writer:     writer,
+		jobs:       jobs,
+		pending:    make(map[string]string),
+		timeCop:    &analysis.TimeCop{MaxResults: 10},
+		tally:      &tapjio.ResultTally{},
 		boldYellow: color.New(color.Bold, color.FgYellow).SprintFunc(),
-		cyan: color.New(color.FgCyan).SprintFunc(),
-		green: color.New(color.FgGreen).SprintFunc(),
-		red: color.New(color.FgRed).SprintFunc(),
-		magenta: color.New(color.FgMagenta).SprintFunc(),
-		bold: color.New(color.Bold).SprintFunc(),
+		cyan:       color.New(color.FgCyan).SprintFunc(),
+		green:      color.New(color.FgGreen).SprintFunc(),
+		red:        color.New(color.FgRed).SprintFunc(),
+		magenta:    color.New(color.FgMagenta).SprintFunc(),
+		bold:       color.New(color.Bold).SprintFunc(),
 	}
 }
 
@@ -129,12 +129,12 @@ func (self *Pretty) writeSummary() {
 	}
 
 	fmt.Fprintf(self.writer, "\nRan %d%% in %v (%v of job time)%s%s %d remaining and %d running:\n",
-		int(float64(self.tally.Total) / float64(self.totalTests) * 100.0),
+		int(float64(self.tally.Total)/float64(self.totalTests)*100.0),
 		round(time.Since(self.startTime), time.Millisecond),
 		millisDuration(self.totalTestTime),
 		tallySummaryPrefix,
 		tallySummary,
-		self.totalTests - self.tally.Total - numPending,
+		self.totalTests-self.tally.Total-numPending,
 		numPending)
 
 	for _, label := range self.pending {
@@ -163,8 +163,8 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 	defer self.writeSummary()
 
 	if ((self.ElideQuietPass && test.Status == tapjio.Pass) ||
-			(self.ElideQuietOmit && test.Status == tapjio.Omit)) &&
-			test.Stdout == "" && test.Stderr == "" {
+		(self.ElideQuietOmit && test.Status == tapjio.Omit)) &&
+		test.Stdout == "" && test.Stderr == "" {
 		return nil
 	}
 
@@ -248,8 +248,6 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 
 		}
 
-
-
 		fmt.Fprintf(self.writer, "\n")
 	}
 
@@ -316,7 +314,7 @@ func round(d, r time.Duration) time.Duration {
 }
 
 func millisDuration(seconds float64) time.Duration {
-	return time.Duration(seconds * 1000) * time.Millisecond
+	return time.Duration(seconds*1000) * time.Millisecond
 }
 
 func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
@@ -343,7 +341,7 @@ func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
 			len(self.timeCop.SlowPassingOutcomes),
 			maybePlural(len(self.timeCop.SlowPassingOutcomes), "test", "tests"),
 			millisDuration(self.timeCop.TotalSlowPassingDuration),
-			self.timeCop.TotalSlowPassingDuration / self.timeCop.TotalDuration * 100,
+			self.timeCop.TotalSlowPassingDuration/self.timeCop.TotalDuration*100,
 			len(self.timeCop.FastPassingOutcomes),
 			maybePlural(len(self.timeCop.FastPassingOutcomes), "other took", "others each took ≤"),
 			millisDuration(self.timeCop.SlowestFastPassingDuration))
@@ -351,8 +349,8 @@ func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
 		slowPassingOutcomes := self.timeCop.SlowPassingOutcomes
 		for _, outcome := range slowPassingOutcomes {
 			fmt.Fprintf(self.writer, "🐌  %-59s %v\n",
-					self.boldYellow(outcome.Label),
-					millisDuration(outcome.Duration))
+				self.boldYellow(outcome.Label),
+				millisDuration(outcome.Duration))
 		}
 	}
 

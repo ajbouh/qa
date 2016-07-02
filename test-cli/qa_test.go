@@ -5,8 +5,8 @@ package qa_test
 import (
 	"bytes"
 	"io"
-	"path"
 	"os"
+	"path"
 	"qa/cmd/run"
 	"qa/tapjio"
 	"testing"
@@ -48,7 +48,7 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 				events = append(events, event)
 				return nil
 			},
-			OnTest:  func(event tapjio.TestEvent) error {
+			OnTest: func(event tapjio.TestEvent) error {
 				events = append(events, event)
 				return nil
 			},

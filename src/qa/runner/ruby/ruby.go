@@ -24,17 +24,17 @@ type ContextConfig struct {
 	Seed              int
 	Dir               string
 	Rubylib           []string
-  RunnerAssetName   string
+	RunnerAssetName   string
 	TraceProbes       []string
 	SquashPolicy      SquashPolicy
 	PassthroughConfig map[string](interface{})
 }
 
 type context struct {
-	requestCh    chan interface{}
-	server       *server.Server
-	process      *os.Process
-	config       *ContextConfig
+	requestCh chan interface{}
+	server    *server.Server
+	process   *os.Process
+	config    *ContextConfig
 }
 
 func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[string]string, files []string) (*context, error) {
@@ -64,8 +64,8 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 
 	// First request is a list of worker environments and list of all test files to require.
 	requestCh <- map[string](interface{}){
-		"workerEnvs": workerEnvs,
-		"files": files,
+		"workerEnvs":  workerEnvs,
+		"files":       files,
 		"passthrough": cfg.PassthroughConfig,
 	}
 
@@ -90,9 +90,9 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 
 	return &context{
 		requestCh: requestCh,
-		server: server,
-		config: cfg,
-		process: cmd.Process,
+		server:    server,
+		config:    cfg,
+		process:   cmd.Process,
 	}, nil
 }
 
@@ -134,8 +134,8 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 					testRunners = append(testRunners, *currentRunner)
 				}
 				currentRunner = &rubyRunner{
-					ctx: self,
-					file: test.File,
+					ctx:     self,
+					file:    test.File,
 					filters: []string{},
 				}
 			}
@@ -176,7 +176,7 @@ func (self *context) request(env map[string]string, args []string) {
 }
 
 type rubyRunner struct {
-	ctx *context
+	ctx     *context
 	file    string
 	filters []string
 }

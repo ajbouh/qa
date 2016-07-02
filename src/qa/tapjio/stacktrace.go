@@ -55,9 +55,9 @@ func (s *stacktraceWeightCache) Add(key string, weight int) {
 }
 
 type stacktraceWriter struct {
-	writer io.Writer
+	writer    io.Writer
 	lastError error
-	cache *stacktraceWeightCache
+	cache     *stacktraceWeightCache
 }
 
 func newStacktraceWriter(writer io.Writer) *stacktraceWriter {
@@ -70,7 +70,7 @@ func newStacktraceWriter(writer io.Writer) *stacktraceWriter {
 	}
 	sw = &stacktraceWriter{
 		writer: writer,
-		cache: newStacktraceWeightCache(16, evict),
+		cache:  newStacktraceWeightCache(16, evict),
 	}
 	return sw
 }
@@ -94,7 +94,6 @@ func (s *stacktraceWriter) EmitStacktrace(key string, weight int) error {
 	s.cache.Add(key, weight)
 	return s.checkAndClearLastError()
 }
-
 
 // Extracts trace events from a tapj stream.
 
