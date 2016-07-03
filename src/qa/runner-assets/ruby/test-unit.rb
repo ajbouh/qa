@@ -267,7 +267,7 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
             rescue Test::Unit::AssertionFailedError => e
               add_failure(e.message, e.backtrace)
             rescue Exception => e
-              raise if PASSTHROUGH_EXCEPTIONS.include?(e.class)
+              raise if ::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit::PASSTHROUGH_EXCEPTIONS.include?(e.class)
               add_error(e)
             ensure
               begin
@@ -278,7 +278,7 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
               rescue Test::Unit::AssertionFailedError => e
                 add_failure(e.message, e.backtrace)
               rescue Exception => e
-                raise if PASSTHROUGH_EXCEPTIONS.include?(e.class)
+                raise if ::ActiveSupport::Testing::SetupAndTeardown::ForClassicTestUnit::PASSTHROUGH_EXCEPTIONS.include?(e.class)
                 add_error(e)
               end
             end
