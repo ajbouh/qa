@@ -87,10 +87,8 @@ func (s *Server) Run() error {
 	for acceptChan != nil {
 		select {
 		case entry := <-s.registerCallbackChan:
-			// fmt.Fprintln(os.Stderr, "Registered", entry)
 			s.visitors[entry.token] = entry.visitor
 		case entry := <-s.registerChannelChan:
-			// fmt.Fprintln(os.Stderr, "Registered", entry)
 			s.exposedChannels[entry.token] = entry.ch
 		case accept, ok := <-acceptChan:
 			if !ok {
@@ -104,7 +102,6 @@ func (s *Server) Run() error {
 			// Token is one-time use.
 			visitor, ok := s.visitors[accept.token]
 			if ok {
-				// fmt.Fprintln(os.Stderr, "Accepted", visitors, ok)
 				delete(s.visitors, accept.token)
 
 				go func() {
@@ -117,7 +114,6 @@ func (s *Server) Run() error {
 
 			exposed, ok := s.exposedChannels[accept.token]
 			if ok {
-				// fmt.Fprintln(os.Stderr, "Accepted", exposed, ok)
 				delete(s.exposedChannels, accept.token)
 				go func() {
 					conn := *accept.conn
@@ -158,7 +154,6 @@ func (s *Server) Decode(callbacks tapjio.Visitor) string {
 	s.registerCallbackChan <- registerCallbackEntry{token, callbacks}
 
 	address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
-	// fmt.Fprintln(os.Stderr, "Will decode address", address)
 
 	return address
 }
@@ -173,7 +168,6 @@ func (s *Server) ExposeChannel(ch chan interface{}) string {
 	s.registerChannelChan <- registerChannelEntry{token, ch}
 
 	address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
-	// fmt.Fprintln(os.Stderr, "Will expose channel at address", ch, address)
 
 	return address
 }

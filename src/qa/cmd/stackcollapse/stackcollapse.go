@@ -1,7 +1,5 @@
 package stackcollapse
 
-// cd <basedir> && qa
-
 import (
 	"flag"
 	"io"

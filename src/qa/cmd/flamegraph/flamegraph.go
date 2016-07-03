@@ -1,7 +1,5 @@
 package flamegraph
 
-// cd <basedir> && qa
-
 import (
 	"bytes"
 	"flag"
@@ -30,9 +28,9 @@ func decodeStacktrace(path string, def io.ReadCloser, writer io.Writer) error {
 
 // Usage:
 //     flamegraph
-//     flamegraph in.tapj
-//     flamegraph in.tapj out.svg
-//     flamegraph in1.tapj in2.tapj out.svg
+//     flamegraph in.tapj [ -- ... ]
+//     flamegraph in.tapj out.svg [ -- ... ]
+//     flamegraph in1.tapj in2.tapj out.svg [ -- ... ]
 
 func Main(args []string) error {
 	flags := flag.NewFlagSet("flamegraph", flag.ContinueOnError)
