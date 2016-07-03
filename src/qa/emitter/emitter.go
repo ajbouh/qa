@@ -15,16 +15,17 @@ type Emitter interface {
 
 type emitterStarter func(srv *server.Server, passthroughConfig map[string](interface{}), workerEnvs []map[string]string, dir string, seed int, files []string) (Emitter, error)
 
+// Enable entries below to add specific method calls (and optionally their arguments) to the trace.
 var rubyTraceProbes = []string{
-	"Kernel#require(path)",
-	"Kernel#load",
-	"ActiveRecord::ConnectionAdapters::Mysql2Adapter#execute(sql,name)",
-	"ActiveRecord::ConnectionAdapters::PostgresSQLAdapter#execute_and_clear(sql,name,binds)",
-	"ActiveSupport::Dependencies::Loadable#require(path)",
-	"ActiveRecord::ConnectionAdapters::QueryCache#clear_query_cache",
-	"ActiveRecord::ConnectionAdapters::SchemaCache#initialize",
-	"ActiveRecord::ConnectionAdapters::SchemaCache#clear!",
-	"ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!",
+// "Kernel#require(path)",
+// "Kernel#load",
+// "ActiveRecord::ConnectionAdapters::Mysql2Adapter#execute(sql,name)",
+// "ActiveRecord::ConnectionAdapters::PostgresSQLAdapter#execute_and_clear(sql,name,binds)",
+// "ActiveSupport::Dependencies::Loadable#require(path)",
+// "ActiveRecord::ConnectionAdapters::QueryCache#clear_query_cache",
+// "ActiveRecord::ConnectionAdapters::SchemaCache#initialize",
+// "ActiveRecord::ConnectionAdapters::SchemaCache#clear!",
+// "ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!",
 }
 
 func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitterStarter {
