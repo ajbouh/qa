@@ -1,4 +1,4 @@
-# QA
+# QA: The last (Ruby) test runner you'll ever need
 
 QA is a lightweight tool for running your tests. It is designed to help you write higher quality code more quickly and with less drudgery. We aspire to make world-class testing practices, like auto-parallelizing tests across hundreds of machines, accessible to everyone.
 
