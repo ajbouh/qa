@@ -12,11 +12,11 @@ import (
 	"qa/tapjio"
 )
 
-type testEventUnion struct {
-	trace     *tapjio.TraceEvent
-	testBegan *tapjio.TestStartedEvent
-	testEvent *tapjio.TestEvent
-	testError error
+type eventUnion struct {
+	trace  *tapjio.TraceEvent
+	begin  *tapjio.TestStartedEvent
+	finish *tapjio.TestEvent
+	error  error
 }
 
 type testSuiteRunner struct {
@@ -84,7 +84,7 @@ func (self *testSuiteRunner) Run(
 	}()
 
 	var abort = false
-	var testChan = make(chan testEventUnion, numWorkers)
+	var eventChan = make(chan eventUnion, numWorkers)
 
 	var awaitJobs sync.WaitGroup
 	awaitJobs.Add(numWorkers)
@@ -96,7 +96,7 @@ func (self *testSuiteRunner) Run(
 			for testRunner := range testRunnerChan {
 				if abort {
 					for i := testRunner.TestCount(); i > 0; i-- {
-						testChan <- testEventUnion{testError: errors.New("already aborted")}
+						eventChan <- eventUnion{error: errors.New("already aborted")}
 					}
 				} else {
 					var awaitRun sync.WaitGroup
@@ -105,15 +105,15 @@ func (self *testSuiteRunner) Run(
 						env,
 						tapjio.DecodingCallbacks{
 							OnTestBegin: func(test tapjio.TestStartedEvent) error {
-								testChan <- testEventUnion{nil, &test, nil, nil}
+								eventChan <- eventUnion{nil, &test, nil, nil}
 								return nil
 							},
 							OnTest: func(test tapjio.TestEvent) error {
-								testChan <- testEventUnion{nil, nil, &test, nil}
+								eventChan <- eventUnion{nil, nil, &test, nil}
 								return nil
 							},
 							OnTrace: func(trace tapjio.TraceEvent) error {
-								testChan <- testEventUnion{&trace, nil, nil, nil}
+								eventChan <- eventUnion{&trace, nil, nil, nil}
 								return nil
 							},
 							OnEnd: func(reason error) error {
@@ -129,19 +129,19 @@ func (self *testSuiteRunner) Run(
 
 	go func() {
 		awaitJobs.Wait()
-		close(testChan)
+		close(eventChan)
 	}()
 
-	for testEventUnion := range testChan {
-		if testEventUnion.trace != nil {
-			err = visitor.TraceEvent(*testEventUnion.trace)
+	for eventUnion := range eventChan {
+		if eventUnion.trace != nil {
+			err = visitor.TraceEvent(*eventUnion.trace)
 			if err != nil {
 				return
 			}
 			continue
 		}
 
-		begin := testEventUnion.testBegan
+		begin := eventUnion.begin
 		if begin != nil {
 			err = visitor.TestStarted(*begin)
 			if err != nil {
@@ -150,9 +150,9 @@ func (self *testSuiteRunner) Run(
 			continue
 		}
 
-		err = testEventUnion.testError
+		err = eventUnion.error
 		if err == nil {
-			test := testEventUnion.testEvent
+			test := eventUnion.finish
 			final.Counts.Increment(test.Status)
 
 			err = visitor.TestFinished(*test)
