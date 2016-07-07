@@ -12,19 +12,19 @@ That's a lofty goal. As a start, we'll keep things simple.
 
 2. See which tests are slowing down your testrun. QA highlights tests that are dramatically slower than the average test duration. Look for the 🐌 at the end of successful testrun!
 
-3. See which test-specific stderr and stdout, even when tests are run in parallel! generated it.
+3. See per-test stderr and stdout, even when tests are run in parallel!
 
 4. Generate a flamegraph (or icicle graph) for the entire testrun, using `-save-flamegraph`, `-save-icegraph`. See also `-save-palette`.
 
-5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each test method in its own worker process. (The default is to run each test case in its own worker fork.)
+5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each test *method* in its own worker process. (Versus each test *case* in its own worker process.)
 
 6. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
 
-7. If a test fails, see source code snippets and, in some cases, actual values of local variables (use option `-errors-capture-locals`, experimental and Mac OS X only) for for each entry in the stack trace.
+7. If a test fails, see source code snippets and, in some cases, actual values of local variables (use option `-errors-capture-locals`, experimental as it only seems to work on Mac OS X) for each entry in the stack trace.
 
 8. Record test output as TAP-J, using `-save-tapj` option.
 
-9. Special ActiveRecord integration means QA will automatically partition tests across multiple databases, one per worker. If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental.
+9. Special ActiveRecord integration means QA will automatically partition tests across multiple databases, one per worker. If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`.
 
 ## What languages and test frameworks does QA support?
 
