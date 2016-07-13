@@ -1,0 +1,8 @@
+{"type":"suite","start":"2014-01-27 14:57:27","count":3,"seed":37263,"rev":4,"digest":"a2b4e4f2f4d4f22986d48e29053dd7d91cd0206b686b5d977b41e8e2c5d7a078","coderef":"platform/spin:2939:744e29b09944641eafffdd0eebaeaa0fb5d134da","label":"platform/spin/backend/identity/testrun:testrun+macosx+x86_64"}
+{"type":"case","subtype":"","label":"RegistrationTest","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_registration","time":91.007617}
+{"type":"case","subtype":"","label":"RegistrationTest","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_remembering","time":33.443471}
+{"type":"case","subtype":"","label":"ConversationCloseTest","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_esc_close","time":15.123134}
+{"type":"final","time":125.523441,"counts":{"total":3,"pass":3,"fail":0,"error":0,"omit":0,"todo":0}}

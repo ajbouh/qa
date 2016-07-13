@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"qa/cmd"
 	"qa/cmd/run"
 	"qa/tapjio"
 	"testing"
@@ -25,12 +26,10 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- run.Main(
-			wr,
-			os.Stderr,
-			dir,
+			&cmd.Env{Stdout: wr, Stderr: os.Stderr, Dir: dir},
 			[]string{
 				"-format=tapj",
-				"rspec:spec/**/*_spec.rb",
+				"rspec",
 				"minitest:test/minitest/**/test*.rb",
 				"test-unit:test/test-unit/**/test*.rb",
 			})
@@ -70,7 +69,8 @@ func runQa(t *testing.T, dir string) (events []interface{}, stderr string, err e
 	return
 }
 
-func testRunner(t *testing.T, baseDir string) {
+func TestRuby(t *testing.T) {
+	baseDir := "fixtures/ruby"
 	var events []interface{}
 	var err error
 	var stderr string
@@ -120,8 +120,4 @@ func testRunner(t *testing.T, baseDir string) {
 	} else {
 		t.Fatal("last event wasn't a final event.", events, stderr)
 	}
-}
-
-func TestRuby(t *testing.T) {
-	testRunner(t, "fixtures/ruby")
 }

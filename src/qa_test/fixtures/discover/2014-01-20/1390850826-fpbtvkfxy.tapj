@@ -1,0 +1,8 @@
+{"type":"suite","start":"2014-01-27 11:27:07","count":3,"seed":47379,"rev":4,"digest":"a2b4e4f2f4d4f22986d48e29053dd7d91cd0206b686b5d977b41e8e2c5d7a078","coderef":"platform/spin:2939:972f4bd61f9219352dc4125c80f94c269089b4b4","label":"platform/spin/backend/identity/testrun:testrun+macosx+x86_64"}
+{"type":"case","subtype":"","label":"RegistrationTest","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_registration","time":58.684677}
+{"type":"case","subtype":"","label":"RegistrationTest","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_remembering","time":34.712452}
+{"type":"case","subtype":"","label":"ConversationCloseTest","level":0}
+{"type":"test","subtype":"","status":"error","label":"test_esc_close","exception":{"message":"something","class":"RuntimeError","file":"/Users/tim/Code/tsumobi/.gimme/output/30553/platform/spin/verification/testplans/ui-conversation-window/testplan/+macosx+x86_64/tests/test-conversation-close.rb","line":27,"source":"raise \"something\"","snippet":[{"25":""},{"26":"  def test_esc_close"},{"27":"    raise \"something\""},{"28":""},{"29":"    app_a = mkprogram('alice')"}],"backtrace":[{"file":"test-conversation-close.rb", "line":27}]},"time":0.005918,"failure-ids":{"line-digest":"a32a3fe013cb440bcf2d51092a616b1662090efdc1af737c3f3ea500ba3157e1","line-digest-no":"a32a3fe013cb440bcf2d51092a616b1662090efdc1af737c3f3ea500ba3157e1:27"}}
+{"type":"final","time":94.372658,"counts":{"total":3,"pass":2,"fail":0,"error":1,"omit":0,"todo":0}}

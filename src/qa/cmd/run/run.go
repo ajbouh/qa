@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -21,9 +20,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mattn/go-zglob"
 
+	"qa/cmd"
 	"qa/emitter"
 	"qa/reporting"
 	"qa/runner"
@@ -40,10 +41,23 @@ func maybeJoin(p string, dir string) string {
 	return p
 }
 
-func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
+const archiveNonceLexicon = "abcdefghijklmnopqrstuvwxyz"
+const archiveNonceLength = 8
+func randomString(r *rand.Rand, lexicon string, length int) string {
+	bytes := make([]byte, length)
+	lexiconLen := len(lexicon)
+	for i := 0; i < length; i++ {
+		bytes[i] = lexicon[r.Intn(lexiconLen)]
+	}
 
+	return string(bytes);
+}
+
+func Main(env *cmd.Env, args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+	archiveBaseDir := flags.String("archive-base-dir", "", "Base directory to store data for later analysis")
 	auditDir := flags.String("audit-dir", "", "Directory to save any generated audits, e.g. TAP-J, JSON, SVG, etc.")
+	quiet := flags.Bool("quiet", false, "Whether or not to print anything at all")
 	saveTapj := flags.String("save-tapj", "", "Path to save TAP-J")
 	saveTrace := flags.String("save-trace", "", "Path to save trace JSON")
 	saveStacktraces := flags.String("save-stacktraces", "", "Path to save stacktraces.txt, implies -sample-stack")
@@ -86,17 +100,19 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 
 	var visitors []tapjio.Visitor
 
-	switch *format {
-	case "tapj":
-		visitors = append(visitors, tapjio.NewTapjEmitter(stdout))
-	case "pretty":
-		pretty := reporting.NewPretty(stdout, *jobs)
-		pretty.ShowUpdatingSummary = *showUpdatingSummary
-		pretty.ElideQuietPass = *elidePass
-		pretty.ElideQuietOmit = *elideOmit
-		visitors = append(visitors, pretty)
-	default:
-		return errors.New(fmt.Sprintf("Unknown format: %v", *format))
+	if !*quiet {
+		switch *format {
+		case "tapj":
+			visitors = append(visitors, tapjio.NewTapjEmitter(env.Stdout))
+		case "pretty":
+			pretty := reporting.NewPretty(env.Stdout, *jobs)
+			pretty.ShowUpdatingSummary = *showUpdatingSummary
+			pretty.ElideQuietPass = *elidePass
+			pretty.ElideQuietOmit = *elideOmit
+			visitors = append(visitors, pretty)
+		default:
+			return errors.New(fmt.Sprintf("Unknown format: %v", *format))
+		}
 	}
 
 	if *saveTapj != "" {
@@ -106,6 +122,22 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 		}
 		defer tapjFile.Close()
 		visitors = append(visitors, tapjio.NewTapjEmitter(tapjFile))
+	}
+
+	if *archiveBaseDir != "" {
+		now := time.Now()
+		tapjArchiveDir := path.Join(*archiveBaseDir, now.Format("2006-01-02"))
+		os.MkdirAll(tapjArchiveDir, 0755)
+		r := rand.New(rand.NewSource(now.UnixNano()))
+		nonce := randomString(r, archiveNonceLexicon, archiveNonceLength)
+
+		tapjArchiveFilePath := path.Join(tapjArchiveDir, fmt.Sprintf("%d-%s.tapj", now.Unix(), nonce))
+		tapjArchiveFile, err := os.Create(tapjArchiveFilePath)
+		if err != nil {
+			return err
+		}
+		defer tapjArchiveFile.Close()
+		visitors = append(visitors, tapjio.NewTapjEmitter(tapjArchiveFile))
 	}
 
 	if *saveTrace != "" {
@@ -237,7 +269,7 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 	go func(c chan os.Signal) {
 		// Wait for signal
 		sig := <-c
-		fmt.Fprintln(stderr, "Got signal:", sig)
+		fmt.Fprintln(env.Stderr, "Got signal:", sig)
 		srv.Close()
 		os.Exit(1)
 	}(sigc)
@@ -260,9 +292,8 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 		var runnerName string
 		var globStr string
 		if len(runnerSpecSplit) != 2 {
-			// TODO(adamb) Should autodetect. For now assume rspec.
-			runnerName = "rspec"
-			globStr = runnerSpecSplit[0]
+			runnerName = runnerSpecSplit[0]
+			globStr = emitter.DefaultGlob(runnerName)
 		} else {
 			runnerName = runnerSpecSplit[0]
 			globStr = runnerSpecSplit[1]
@@ -272,18 +303,20 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 
 		for _, glob := range strings.Split(globStr, ":") {
 			relative := !filepath.IsAbs(glob)
-			if relative {
-				glob = filepath.Join(dir, glob)
+			if relative && env.Dir != "" {
+				glob = filepath.Join(env.Dir, glob)
 			}
 
 			globFiles, err := zglob.Glob(glob)
-			fmt.Fprintf(stderr, "Resolved %v to %v\n", glob, globFiles)
-			if err != nil {
-				return err
+			if !*quiet {
+				fmt.Fprintf(env.Stderr, "Resolved %v to %v\n", glob, globFiles)
+				if err != nil {
+					return err
+				}
 			}
 
-			if relative {
-				trimPrefix := fmt.Sprintf("%s%c", dir, os.PathSeparator)
+			if relative && env.Dir != "" {
+				trimPrefix := fmt.Sprintf("%s%c", env.Dir, os.PathSeparator)
 				for _, file := range globFiles {
 					files = append(files, strings.TrimPrefix(file, trimPrefix))
 				}
@@ -300,7 +333,7 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 			"sampleStack":         *sampleStack,
 		}
 
-		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, dir, seed, files)
+		em, err := emitter.Resolve(runnerName, srv, passthrough, workerEnvs, env.Dir, env.Vars, seed, files)
 		if err != nil {
 			return err
 		}
@@ -326,10 +359,10 @@ func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 
 	final, err = suite.Run(workerEnvs, visitor)
 	if err != nil {
-		fmt.Fprintln(stderr, "Error in NewTestSuiteRunner", err)
+		fmt.Fprintln(env.Stderr, "Error in NewTestSuiteRunner", err)
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if len(exitError.Stderr) > 0 {
-				fmt.Fprintln(stderr, string(exitError.Stderr))
+				fmt.Fprintln(env.Stderr, string(exitError.Stderr))
 			}
 		}
 

@@ -741,17 +741,37 @@ module Qa::TapjExceptions
   @@_source_cache = {}
 
   def summarize_exception(error, backtrace, message=nil)
-    # [{"file" => "...", "line" => N, "variables" => {"..." => "", ...}}, ...]
+    # [
+    #   {
+    #     "file" => "...",
+    #     "method" => "...",
+    #     "line" => N,
+    #     "variables" => {"..." => "", ...}
+    #   },
+    #   ...
+    # ]
 
     backtrace_bindings = error.instance_variable_get(:@__qa_caller_bindings)
+    load_path = $LOAD_PATH
 
     backtrace = backtrace.each_with_index.map do |entry, index|
-      entry =~ /(.+?):(\d+(?=:|\z))/ || (next nil)
+      entry =~ /(.+?):(\d+)(?:\:in `(.*)')?/ || (next nil)
 
-      h = {"file" => $1, "line" => $2.to_i}
+      raw_file = $1
+      line = $2.to_i
+      method = $3
+
+      if prefix = load_path.find { |p| raw_file.start_with?(p) }
+        file = raw_file[(prefix.length+1)..-1]
+      else
+        file = raw_file
+      end
+
+      h = {"raw-file" => raw_file, "line" => line, "file" => file}
+      h["method"] = method if method
       if backtrace_bindings && b = backtrace_bindings[index]
         method, locals = b.eval("[__method__, local_variables]")
-        if entry.end_with?("in `#{method}'")
+        if h['method'] == method
           h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
         else
           $__qa_stderr.puts "mismatch: '#{entry}' doesn't end with: '#{method}'"
@@ -765,9 +785,9 @@ module Qa::TapjExceptions
 
     snippets = {} # {"<path>": {N => "...", ...}, ...}
     backtrace.each do |entry|
-      file, line = entry["file"], entry["line"]
+      raw_file, file, line = entry.delete("raw-file"), entry["file"], entry["line"]
       snippet = (snippets[file] ||= {})
-      snippet.update(code_snippet(file, line))
+      snippet.update(code_snippet(raw_file, line))
     end
 
     {

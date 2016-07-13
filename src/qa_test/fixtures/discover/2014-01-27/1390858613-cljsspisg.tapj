@@ -1,0 +1,12 @@
+{"type":"suite","start":"2014-01-27 13:37:49","count":5,"seed":15390,"rev":4,"digest":"31684353e7d5fa2445ae3c49a77b8da474aaa51207fbef82bdd002f4f500ba4e","coderef":"platform/spin:2939:972f4bd61f9219352dc4125c80f94c269089b4b4","label":"tools/review/node-testruns/ci:testrun+macosx+x86_64"}
+{"type":"case","subtype":"","label":"TestSimpleBuilds","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_simple_failing_build","time":47.674762}
+{"type":"case","subtype":"","label":"TestAnnotations","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_annotations","time":55.69333}
+{"type":"case","subtype":"","label":"TestSimpleBuilds","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_simple_passing_build","time":22.484453}
+{"type":"case","subtype":"","label":"TestSimpleBuilds","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_simple_passing_build","time":22.06173}
+{"type":"case","subtype":"","label":"TestMerges","level":0}
+{"type":"test","subtype":"","status":"pass","label":"test_slave_interval_scheduler","time":11.234545}
+{"type":"final","time":365.370568,"counts":{"total":5,"pass":5,"fail":0,"error":0,"omit":0,"todo":0}}

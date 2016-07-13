@@ -5,6 +5,8 @@ import (
 	"sort"
 )
 
+// TimeCop detects which tests are "holding back" a particular TAP-J stream.
+// It does this by identifying tests are dramatically longer than the average.
 type TimeCop struct {
 	outcomes               []outcome
 	passingOutcomes        []outcome

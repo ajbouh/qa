@@ -22,6 +22,7 @@ const (
 
 type ContextConfig struct {
 	Seed              int
+	EnvVars           map[string]string
 	Dir               string
 	Rubylib           []string
 	RunnerAssetName   string
@@ -74,6 +75,14 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 	}
 
 	cmd := exec.Command("ruby", args...)
+
+	if len(cfg.EnvVars) > 0 {
+		baseEnv := os.Environ()
+		for envVarName, envVarValue := range cfg.EnvVars {
+			baseEnv = append(baseEnv, fmt.Sprintf("%s=%s", envVarName, envVarValue))
+		}
+		cmd.Env = baseEnv
+	}
 
 	// The code below will wrap the worker in a gdb session.
 	// args = append([]string{"-ex=set follow-fork-mode child", "-ex=r", "--args", "ruby"}, args...)
