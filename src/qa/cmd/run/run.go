@@ -43,12 +43,12 @@ func maybeJoin(p string, dir string) string {
 func Main(stdout io.Writer, stderr io.Writer, dir string, args []string) error {
 
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
-	auditDir := flags.String("audit-dir", "", "Directory to save TAP-J, JSON, SVG")
-	saveTapj := flags.String("save-tapj", "results.tapj", "Path to save TAP-J")
-	saveTrace := flags.String("save-trace", "trace.json", "Path to save trace JSON")
+	auditDir := flags.String("audit-dir", "", "Directory to save any generated audits, e.g. TAP-J, JSON, SVG, etc.")
+	saveTapj := flags.String("save-tapj", "", "Path to save TAP-J")
+	saveTrace := flags.String("save-trace", "", "Path to save trace JSON")
 	saveStacktraces := flags.String("save-stacktraces", "", "Path to save stacktraces.txt, implies -sample-stack")
-	saveFlamegraph := flags.String("save-flamegraph", "flamegraph.svg", "Path to save flamegraph SVG, implies -sample-stack")
-	saveIcegraph := flags.String("save-icegraph", "icegraph.svg", "Path to save icegraph SVG, implies -sample-stack")
+	saveFlamegraph := flags.String("save-flamegraph", "", "Path to save flamegraph SVG, implies -sample-stack")
+	saveIcegraph := flags.String("save-icegraph", "", "Path to save icegraph SVG, implies -sample-stack")
 	savePalette := flags.String("save-palette", "palette.map", "Path to save (flame|ice)graph palette")
 	format := flags.String("format", "pretty", "Set output format")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "Set number of jobs")
