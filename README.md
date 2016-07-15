@@ -43,7 +43,7 @@ Please open an issue to request other languages and frameworks!
 
 ## Getting started with QA
 
-Download the latest release and put the executable somewhere on your `PATH`. Switch to your project directory and run `qa`. See below for an example.
+Download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`. Switch to your project directory and run `qa`. See below for an example.
 
 ## How to use QA to run your tests
 
