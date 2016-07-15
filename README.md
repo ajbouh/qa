@@ -43,7 +43,14 @@ Please open an issue to request other languages and frameworks!
 
 ## Getting started with QA
 
-Download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`. Switch to your project directory and run `qa`. See below for an example.
+QA is not yet available via brew, apt, or any other software distribution repository. To start using it, you'll need to download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`.
+
+You can also run the command below to download and unpack the latest release to the current directory.
+```
+curl -L -O $(curl -s https//api.github.com/repos/ajbouh/qa/releases/latest | grep "browser_" | grep -i $(uname -s) | cut -d\" -f4) && unzip qa-*.zip
+```
+
+See below for an example usage.
 
 ## How to use QA to run your tests
 
@@ -60,7 +67,7 @@ Example usage and output:
 ```
 > cd $project
 > qa run minitest:test/test**.rb
-???
+...
 ```
 
 ## What are flaky tests?<a name="whatis_flaky"></a>
