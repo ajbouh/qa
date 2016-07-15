@@ -3,33 +3,41 @@ $__qa_stderr = $stderr.dup
 module Qa; end
 
 module Qa::Binding
-  # From https://github.com/banister/binding_of_caller/issues/57
-  # Thanks to Steve Shreeve <steve.shreeve@gmail.com>
+  begin
+    # From https://github.com/banister/binding_of_caller/issues/57
+    # Thanks to Steve Shreeve <steve.shreeve@gmail.com>
 
-  require 'fiddle/import'
+    require 'fiddle/import'
+  rescue LoadError
+    class << self
+      def callers
+        []
+      end
+    end
+  else
+    extend Fiddle::Importer
 
-  extend Fiddle::Importer
+    dlload Fiddle.dlopen(nil)
 
-  dlload Fiddle.dlopen(nil)
+    DebugStruct = struct [
+      "void* thread",
+      "void* frame",
+      "void* backtrace",
+      "void* contexts",
+      "long  backtrace_size"
+    ]
 
-  DebugStruct = struct [
-    "void* thread",
-    "void* frame",
-    "void* backtrace",
-    "void* contexts",
-    "long  backtrace_size"
-  ]
+    extern "void* rb_debug_inspector_open(void*, void*)"
+    bind("void* callback(void*, void*)") do |ptr, _|
+      DebugStruct.new(ptr).contexts
+    end
 
-  extern "void* rb_debug_inspector_open(void*, void*)"
-  bind("void* callback(void*, void*)") do |ptr, _|
-    DebugStruct.new(ptr).contexts
-  end
-
-  class << self
-    def callers
-      list_ptr = rb_debug_inspector_open(self['callback'], nil)
-      list = list_ptr.to_value
-      list.drop(4).map {|ary| ary[2] } # grab proper bindings
+    class << self
+      def callers
+        list_ptr = rb_debug_inspector_open(self['callback'], nil)
+        list = list_ptr.to_value
+        list.drop(4).map {|ary| ary[2] } # grab proper bindings
+      end
     end
   end
 end
