@@ -1,10 +1,8 @@
 # QA: The last (Ruby) test runner you'll ever need
 
-QA is a lightweight tool for running your tests. It is designed to help you write higher quality code more quickly and with less drudgery. We aspire to make world-class testing practices, like auto-parallelizing tests across hundreds of machines, accessible to everyone.
+QA is a lightweight tool for running your tests *fast*.
 
-For years, the software testing ecosystem has lagged behind other parts of the software development pipeline (e.g. type systems, compiler technology, prototyping environments etc. to name a few). It's time to change this.
-
-That's a lofty goal. As a start, we'll keep things simple.
+For years, the software testing ecosystem has lagged behind other parts of the software development pipeline. Advances in type systems, compiler technology, and prototyping environments (to name a few) have helped make software engineers much more productive. QA is an effort to make similar strides for automated testing tools.
 
 ## What can QA help me do today?
 
@@ -12,33 +10,36 @@ That's a lofty goal. As a start, we'll keep things simple.
 
 2. See which tests are slowing down your testrun. QA highlights tests that are dramatically slower than the average test duration. Look for the 🐌 at the end of successful testrun!
 
-3. See per-test stderr and stdout, even when tests are run in parallel!
+3. See per-test stderr and stdout. Even when running tests in parallel!
 
-4. Generate a flamegraph (or icicle graph) for the entire testrun, using `-save-flamegraph`, `-save-icegraph`. See also `-save-palette`.
+4. Investigate test performance by generating flamegraphs (or icicle graph) for the entire testrun. See `-save-flamegraph`, `-save-icegraph`, and `-save-palette`.
 
-5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each test *method* in its own worker process. (Versus each test *case* in its own worker process.)
+5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each *method* in a separate child process. (Versus each *case* in its own worker process.)
 
 6. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
 
-7. If a test fails, see source code snippets and, in some cases, actual values of local variables (use option `-errors-capture-locals`, experimental as it only seems to work on Mac OS X) for each entry in the stack trace.
+7. See source code snippets and (with the experimental `-errors-capture-locals`) actual values of local variables for each from of an error's stack trace.
 
 8. Record test output as TAP-J, using `-save-tapj` option.
 
-9. Special ActiveRecord integration means QA will automatically partition tests across multiple databases, one per worker. If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`.
+9. Automatically partition tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`.
 
 ## What languages and test frameworks does QA support?
 
-Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler.
+Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler. For example, if you're using rspec:
+```
+bundle exec qa run rspec:spec/**/*spec.rb
+```
 
-Please open an issue to request other languages and frameworks!
+Please [open an issue](https://github.com/ajbouh/qa/issues/new) to request other languages and frameworks!
 
 ## What will QA help me do tomorrow?
 
 1. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose flaky, slow, and otherwise problematic tests.
 
-2. A faster and more focused development cycle. QA will prioritize test ordering based on what's failed recently and what files you're changing.
+2. A faster and more focused development cycle. QA will prioritize test ordering based on the files you're changing and what's failed recently.
 
-3. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines and stream the results back to your terminal in real time.
+3. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines (like [AWS Lambda](https://aws.amazon.com/lambda/)) and stream the results back to your terminal in real time.
 
 
 ## Getting started with QA
@@ -76,7 +77,7 @@ For a fast moving software team, automated tests are the last line of defense ag
 
 Flaky tests sap your confidence in the rest of your tests. Their existence robs you of the peace of mind from seeing a test's "PASS" status. Every team has to battle flaky tests at some point, and few succeed in keeping them at bay. In fact, flakiness may wear you down to the point where you re-run a failed test, hoping that "MAYBE it is _just flaky_". Or worse, you comment it out, and suffer a customer-facing bug that would have been covered by the test!
 
-So that's the bad news: by their very nature, flaky tests are hard to avoid. In many cases they start out looking like healthy tests. But when running on a machine under heavy load, they rear their ugly, randomly failing heads.  In some cases they may only fail when the network is saturated. (Which is a reason to avoid tests that rely on third party services in the first place.) Or the opposite could happen: you upgrade a dependency or language runtime to a faster version, and this speeds up testrun enough to unveil latent flakiness you never recognized. Such are the perverse economics of flaky tests.
+So that's the bad news: by their very nature, flaky tests are hard to avoid. In many cases they start out looking like healthy tests. But when running on a machine under heavy load, they rear their ugly, randomly failing heads.  In some cases they may only fail when the network is saturated. (Which is a reason to avoid tests that rely on third party services in the first place.) Or the opposite could happen: you upgrade a dependency or language runtime to a faster version, and this speeds up the testrun enough to unveil latent flakiness you never recognized. Such are the perverse economics of flaky tests.
 
 ## How will QA help me with test flakiness?
 Now the good news: with QA, we've set out to address the shortcomings we see with today's testing tools. We want a toolset that's *fast* and gives us more firepower for dealing with the reality of flaky tests.
