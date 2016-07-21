@@ -16,13 +16,15 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each *method* in a separate child process. (Versus each *case* in its own worker process.)
 
-6. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
+6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive-base-dir` option for `qa run` records test outcomes across different runs. Use the `qa flaky` command with the same `-archive-base-dir` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
 
-7. See source code snippets and (with the experimental `-errors-capture-locals`) actual values of local variables for each from of an error's stack trace.
+7. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
 
-8. Record test output as TAP-J, using `-save-tapj` option.
+8. See source code snippets and (with the experimental `-errors-capture-locals`) actual values of local variables for each from of an error's stack trace.
 
-9. Automatically partition tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`.
+9. Record test output as TAP-J, using `-save-tapj` option.
+
+10. Automatically partition Rails tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`. Please [open an issue]((https://github.com/ajbouh/qa/issues/new) if you have trouble.
 
 ## What languages and test frameworks does QA support?
 
@@ -31,16 +33,13 @@ Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa,
 bundle exec qa run rspec
 ```
 
-Please [open an issue](https://github.com/ajbouh/qa/issues/new) to request other languages and frameworks!
-
 ## What will QA help me do tomorrow?
 
-1. Analyze and eliminate [test flakiness](#whatis_flaky). By recording test outcomes across different runs, QA can integrate with existing tools (along with some new ones) to identify and diagnose flaky, slow, and otherwise problematic tests.
+1. A faster and more focused development cycle. QA will prioritize test ordering based on the files you're changing and what's failed recently.
 
-2. A faster and more focused development cycle. QA will prioritize test ordering based on the files you're changing and what's failed recently.
+2. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines (like [AWS Lambda](https://aws.amazon.com/lambda/)) and stream the results back to your terminal in real time.
 
-3. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines (like [AWS Lambda](https://aws.amazon.com/lambda/)) and stream the results back to your terminal in real time.
-
+3. Support more languages and testing frameworks. Please [open an issue](https://github.com/ajbouh/qa/issues/new) with your request!
 
 ## Getting started with QA
 
@@ -116,12 +115,12 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [ ] Add integration with system monitoring agents (e.g. performance copilot)
 
 ### Flakiness
-- [ ] Fingerprint tests, augmenting TAP-J stream
+- [X] Fingerprint tests, augmenting TAP-J stream
 - [ ] Fingerprint AUT (application under test), augmenting TAP-J stream
-- [ ] Add TAP-J analysis tools, to detect rates of flakiness in tests
+- [X] Add TAP-J analysis tools, to detect rates of flakiness in tests
 - [ ] Add support for marking some tests as (implicitly?) new, forcing them to be run many times and pass every time
 - [ ] Add support for marking tests as flaky, separating their results from the results of other tests
-- [ ] For tests that are failing (flaky or not), shows distribution of which line failed, test duration, version of code
+- [ ] For tests that are failing flakily, show distribution of which line failed, test duration, version of code
 
 ### Continuous integration
 - [ ] Add support for auto-filing issues (or updating existing issues) when a merged test fails that should not be flaky
@@ -140,4 +139,5 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [ ] Add support for overriding network syscalls (e.g. DNS, TCP connections)
 - [ ] Add support for overriding time syscalls libfaketime
 - [ ] Add support for overriding filesystem syscalls with charybdefs
+- [ ] Provide a way to capture all network traffic generated by tests (e.g. with https://github.com/jonasdn/nsntrace)
 - [ ] Provide a way to exactly reproduce failures (e.g. with Mozilla's rr)
