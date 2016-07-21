@@ -79,8 +79,14 @@ var starters = map[string]emitterStarter{
 
 var defaultGlobs = map[string]string {
 	"rspec": "spec/**/*spec.rb",
+	"rspec-squashall": "spec/**/*spec.rb",
+	"rspec-pendantic": "spec/**/*spec.rb",
 	"minitest": "test/**/test*.rb",
+	"minitest-squashall": "test/**/test*.rb",
+	"minitest-pendantic": "test/**/test*.rb",
 	"test-unit": "test/**/test*.rb",
+	"test-unit-squashall": "test/**/test*.rb",
+	"test-unit-pendantic": "test/**/test*.rb",
 }
 
 func DefaultGlob(name string) string {
