@@ -73,6 +73,7 @@ func Main(env *cmd.Env, args []string) error {
 
 	errorsCaptureLocals := flags.String("errors-capture-locals", "false", "Use runtime debug API to capture locals from stack when raising errors")
 	captureStandardFds := flags.Bool("capture-standard-fds", true, "Capture stdout and stderr")
+	evalBeforeFork := flags.String("eval-before-fork", "", "Execute the given code before forking any workers or loading any files")
 	evalAfterFork := flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins")
 	sampleStack := flags.Bool("sample-stack", false, "Enable stack sampling")
 
@@ -329,6 +330,7 @@ func Main(env *cmd.Env, args []string) error {
 			"warmup":              *warmup,
 			"errorsCaptureLocals": *errorsCaptureLocals,
 			"captureStandardFds":  *captureStandardFds,
+			"evalBeforeFork":      *evalBeforeFork,
 			"evalAfterFork":       *evalAfterFork,
 			"sampleStack":         *sampleStack,
 		}

@@ -1225,6 +1225,9 @@ class ::Qa::TestEngine
     end
     qa_trace.start
 
+    eval_before_fork = (passthrough['evalBeforeFork'] || '')
+    eval(eval_before_fork) unless eval_before_fork.empty?
+
     # Delegate prefork actions.
     @prefork.call(initial_files)
 
