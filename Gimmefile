@@ -32,7 +32,7 @@
         ]
       },
       "commands": [
-        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio",
+        "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio qa/analysis",
         "env GOPATH=$PWD:$GIMME_SCRATCH GOOS=linux GOARCH=amd64 go build -o $GIMME_OUTPUT/bin/qa qa/main"
       ],
       "prepend-platform-env": {
