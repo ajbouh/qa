@@ -24,7 +24,7 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 9. Record test output as TAP-J, using `-save-tapj` option.
 
-10. Automatically partition Rails tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`. Please [open an issue]((https://github.com/ajbouh/qa/issues/new) if you have trouble.
+10. Automatically partition Rails tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`. Please [open an issue](https://github.com/ajbouh/qa/issues/new) if you have trouble.
 
 ## What languages and test frameworks does QA support?
 
