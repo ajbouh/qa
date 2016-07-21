@@ -6,7 +6,7 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 ## What can QA help me do today?
 
-1. Run your tests faster. Run `qa run <type>:<glob>` in your project directory and watch your test results scream by as they run in parallel. QA provides a beautiful, easy to understand report. No Rakefile necessary!
+1. Run your tests faster. Run `qa run <type>` in your project directory and watch your test results scream by as they run in parallel. QA provides a beautiful, easy to understand report. No Rakefile necessary!
 
 2. See which tests are slowing down your testrun. QA highlights tests that are dramatically slower than the average test duration. Look for the 🐌 at the end of successful testrun!
 
@@ -28,7 +28,7 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler. For example, if you're using rspec:
 ```
-bundle exec qa run rspec:spec/**/*spec.rb
+bundle exec qa run rspec
 ```
 
 Please [open an issue](https://github.com/ajbouh/qa/issues/new) to request other languages and frameworks!
@@ -67,7 +67,7 @@ test/
 Example usage and output:
 ```
 > cd $project
-> qa run minitest:test/test**.rb
+> qa run minitest
 ...
 ```
 
