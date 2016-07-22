@@ -77,7 +77,7 @@ func Main(env *cmd.Env, args []string) error {
 	evalAfterFork := flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins")
 	sampleStack := flags.Bool("sample-stack", false, "Enable stack sampling")
 
-	warmup := flags.Bool("warmup", true, "Try to warm up various worker caches")
+	warmup := flags.Bool("warmup", false, "Use a variety of experimental heuristics to warm up worker caches")
 
 	err := flags.Parse(args)
 	if err != nil {
