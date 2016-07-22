@@ -752,7 +752,7 @@ module Qa::TapjExceptions
     # ]
 
     backtrace_bindings = error.instance_variable_get(:@__qa_caller_bindings)
-    load_path = $LOAD_PATH
+    load_path = $LOAD_PATH.map(&:to_s)
 
     backtrace = backtrace.each_with_index.map do |entry, index|
       entry =~ /(.+?):(\d+)(?:\:in `(.*)')?/ || (next nil)
