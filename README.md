@@ -70,6 +70,12 @@ Example usage and output:
 ...
 ```
 
+## Troubleshooting QA
+
+Since QA is still in alpha, there are a number of rough edges.
+
+If `qa run` seems to be acting strangely and isn't providing a reasonable error message, you may be experiencing a bug relating to swallowed error output. This is tied to QA's stdout and stderr capture logic. Adding the `-capture-standard-fds=false` option will disable the capture logic and should allow the original error to bubble up. Please [open an issue](https://github.com/ajbouh/qa/issues/new) with the error output.
+
 ## What are flaky tests?<a name="whatis_flaky"></a>
 
 For a fast moving software team, automated tests are the last line of defense against shipping broken software to customers. But there's a dirty little secret in the world of automated testing: flaky tests. A flaky test fails intermittently with some (apparently random) probability. A flaky test doesn't care that it just passed 9 times in a row. On the 10th run, it will relish the chance to slowly drain your team's sanity.
