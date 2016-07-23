@@ -12,23 +12,10 @@ import (
 	"sync"
 )
 
-type SquashPolicy int
-
-const (
-	SquashNothing SquashPolicy = iota
-	SquashByFile
-	SquashAll
-)
-
 type ContextConfig struct {
-	Seed              int
-	EnvVars           map[string]string
-	Dir               string
-	Rubylib           []string
-	RunnerAssetName   string
-	TraceProbes       []string
-	SquashPolicy      SquashPolicy
-	PassthroughConfig map[string](interface{})
+	RunnerConfig    runner.Config
+	Rubylib         []string
+	RunnerAssetName string
 }
 
 type context struct {
@@ -38,8 +25,15 @@ type context struct {
 	config    *ContextConfig
 }
 
-func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[string]string, files []string) (*context, error) {
+func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[string]string) (*context, error) {
 	requestCh := make(chan interface{}, 1)
+
+	runnerCfg := cfg.RunnerConfig
+
+	files, err := runnerCfg.Files()
+	if err != nil {
+		return nil, err
+	}
 
 	sharedData, err := assets.Asset("ruby/shared.rb")
 	if err != nil {
@@ -67,18 +61,18 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 	requestCh <- map[string](interface{}){
 		"workerEnvs":  workerEnvs,
 		"files":       files,
-		"passthrough": cfg.PassthroughConfig,
+		"passthrough": runnerCfg.PassthroughConfig,
 	}
 
-	for _, traceProbe := range cfg.TraceProbes {
+	for _, traceProbe := range runnerCfg.TraceProbes {
 		args = append(args, "--trace-probe", traceProbe)
 	}
 
 	cmd := exec.Command("ruby", args...)
 
-	if len(cfg.EnvVars) > 0 {
+	if len(runnerCfg.EnvVars) > 0 {
 		baseEnv := os.Environ()
-		for envVarName, envVarValue := range cfg.EnvVars {
+		for envVarName, envVarValue := range runnerCfg.EnvVars {
 			baseEnv = append(baseEnv, fmt.Sprintf("%s=%s", envVarName, envVarValue))
 		}
 		cmd.Env = baseEnv
@@ -88,7 +82,7 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 	// args = append([]string{"-ex=set follow-fork-mode child", "-ex=r", "--args", "ruby"}, args...)
 	// cmd := exec.Command("gdb", args...)
 
-	cmd.Dir = cfg.Dir
+	cmd.Dir = runnerCfg.Dir
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stderr
@@ -107,21 +101,16 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 
 // TODO(adamb) Should also cancel all existing waitgroups
 func (self *context) Close() (err error) {
-	s := *self.server
+	close(self.requestCh)
+
 	if self.process != nil {
 		err = self.process.Kill()
-	}
-
-	closeErr := s.Close()
-	if closeErr != nil {
-		err = closeErr
+		if err != nil {
+			_, err = self.process.Wait()
+		}
 	}
 
 	return
-}
-
-func (self *context) TraceProbes() []string {
-	return self.config.TraceProbes
 }
 
 func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
@@ -136,9 +125,10 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 			return
 		},
 		OnTest: func(test tapjio.TestEvent) error {
-			if cfg.SquashPolicy == SquashNothing ||
-				cfg.SquashPolicy == SquashByFile && (currentRunner == nil || currentRunner.file != test.File) ||
-				cfg.SquashPolicy == SquashAll && currentRunner == nil {
+			squashPolicy := cfg.RunnerConfig.SquashPolicy
+			if squashPolicy == runner.SquashNothing ||
+				squashPolicy == runner.SquashByFile && (currentRunner == nil || currentRunner.file != test.File) ||
+				squashPolicy == runner.SquashAll && currentRunner == nil {
 				if currentRunner != nil {
 					testRunners = append(testRunners, *currentRunner)
 				}
@@ -164,7 +154,7 @@ func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunn
 		map[string]string{},
 		[]string{
 			"--dry-run",
-			"--seed", fmt.Sprintf("%v", cfg.Seed),
+			"--seed", fmt.Sprintf("%v", cfg.RunnerConfig.Seed),
 			"--tapj-sink", serverAddress,
 		})
 	wg.Wait()
@@ -264,7 +254,7 @@ func (self rubyRunner) Run(env map[string]string, callbacks tapjio.DecodingCallb
 	self.ctx.request(
 		env,
 		append([]string{
-			"--seed", fmt.Sprintf("%v", self.ctx.config.Seed),
+			"--seed", fmt.Sprintf("%v", self.ctx.config.RunnerConfig.Seed),
 			"--tapj-sink", self.ctx.subscribeVisitor(&callbacks),
 		}, self.filters...))
 

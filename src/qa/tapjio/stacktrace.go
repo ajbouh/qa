@@ -89,6 +89,7 @@ func (s *stacktraceWriter) EmitStacktrace(key string, weight int) error {
 
 type stacktraceEmitter struct {
 	writer io.Writer
+	closer io.Closer
 }
 
 type encodedProfile struct {
@@ -167,6 +168,13 @@ func decodeFlamegraphSample(writer io.Writer, b []byte) error {
 	return nil
 }
 
+func NewStacktraceEmitCloser(writer io.WriteCloser) *stacktraceEmitter {
+	return &stacktraceEmitter{
+		writer: writer,
+		closer: writer,
+	}
+}
+
 func NewStacktraceEmitter(writer io.Writer) *stacktraceEmitter {
 	return &stacktraceEmitter{
 		writer: writer,
@@ -205,5 +213,8 @@ func (t *stacktraceEmitter) TestFinished(event TestEvent) error {
 }
 
 func (t *stacktraceEmitter) End(reason error) error {
+	if t.closer != nil {
+		return t.closer.Close()
+	}
 	return nil
 }

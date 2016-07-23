@@ -6,12 +6,17 @@ import (
 )
 
 type tapj struct {
+	closer       io.Closer
 	encoder      *json.Encoder
 	currentCases []CaseEvent
 }
 
+func NewTapjEmitCloser(writer io.WriteCloser) *tapj {
+	return &tapj{encoder: json.NewEncoder(writer), closer: writer}
+}
+
 func NewTapjEmitter(writer io.Writer) *tapj {
-	return &tapj{encoder: json.NewEncoder(writer)}
+	return &tapj{encoder: json.NewEncoder(writer), closer: nil}
 }
 
 func (t *tapj) TraceEvent(event TraceEvent) error {
@@ -64,5 +69,9 @@ func (t *tapj) SuiteFinished(event FinalEvent) error {
 }
 
 func (t *tapj) End(reason error) error {
+	if t.closer != nil {
+		return t.closer.Close()
+	}
+
 	return nil
 }

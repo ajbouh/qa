@@ -84,6 +84,9 @@ func (s *Server) Run() error {
 		}
 	}()
 
+	defer close(s.registerCallbackChan)
+	defer close(s.registerChannelChan)
+
 	for acceptChan != nil {
 		select {
 		case entry := <-s.registerCallbackChan:

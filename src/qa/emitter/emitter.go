@@ -9,54 +9,28 @@ import (
 )
 
 type Emitter interface {
-	TraceProbes() []string
 	EnumerateTests() ([]tapjio.TraceEvent, []runner.TestRunner, error)
+	Close() error
 }
 
 type emitterStarter func(
 	srv *server.Server,
-	passthroughConfig map[string](interface{}),
 	workerEnvs []map[string]string,
-	dir string,
-	env map[string]string,
-	seed int,
-	files []string) (Emitter, error)
+	runnerConfig runner.Config) (Emitter, error)
 
-// Enable entries below to add specific method calls (and optionally their arguments) to the trace.
-var rubyTraceProbes = []string{
-// "Kernel#require(path)",
-// "Kernel#load",
-// "ActiveRecord::ConnectionAdapters::Mysql2Adapter#execute(sql,name)",
-// "ActiveRecord::ConnectionAdapters::PostgresSQLAdapter#execute_and_clear(sql,name,binds)",
-// "ActiveSupport::Dependencies::Loadable#require(path)",
-// "ActiveRecord::ConnectionAdapters::QueryCache#clear_query_cache",
-// "ActiveRecord::ConnectionAdapters::SchemaCache#initialize",
-// "ActiveRecord::ConnectionAdapters::SchemaCache#clear!",
-// "ActiveRecord::ConnectionAdapters::SchemaCache#clear_table_cache!",
-}
-
-func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitterStarter {
+func rubyEmitterStarter(runnerAssetName string) emitterStarter {
 	return func(
 		srv *server.Server,
-		passthroughConfig map[string](interface{}),
 		workerEnvs []map[string]string,
-		dir string,
-		env map[string]string,
-		seed int,
-		files []string) (Emitter, error) {
+		runnerConfig runner.Config) (Emitter, error) {
 
 		config := &ruby.ContextConfig{
-			Dir:               dir,
-			EnvVars:           env,
-			Seed:              seed,
-			Rubylib:           []string{"spec", "lib", "test"},
-			RunnerAssetName:   runnerAssetName,
-			TraceProbes:       rubyTraceProbes,
-			SquashPolicy:      policy,
-			PassthroughConfig: passthroughConfig,
+			RunnerConfig:    runnerConfig,
+			Rubylib:         []string{"spec", "lib", "test"},
+			RunnerAssetName: runnerAssetName,
 		}
 
-		ctx, err := ruby.StartContext(config, srv, workerEnvs, files)
+		ctx, err := ruby.StartContext(config, srv, workerEnvs)
 		if err != nil {
 			return nil, err
 		}
@@ -66,27 +40,15 @@ func rubyEmitterStarter(runnerAssetName string, policy ruby.SquashPolicy) emitte
 }
 
 var starters = map[string]emitterStarter{
-	"rspec":               rubyEmitterStarter("ruby/rspec.rb", ruby.SquashByFile),
-	"rspec-squashall":     rubyEmitterStarter("ruby/rspec.rb", ruby.SquashAll),
-	"rspec-pendantic":     rubyEmitterStarter("ruby/rspec.rb", ruby.SquashNothing),
-	"minitest":            rubyEmitterStarter("ruby/minitest.rb", ruby.SquashByFile),
-	"minitest-squashall":  rubyEmitterStarter("ruby/minitest.rb", ruby.SquashAll),
-	"minitest-pendantic":  rubyEmitterStarter("ruby/minitest.rb", ruby.SquashNothing),
-	"test-unit":           rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashByFile),
-	"test-unit-squashall": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashAll),
-	"test-unit-pendantic": rubyEmitterStarter("ruby/test-unit.rb", ruby.SquashNothing),
+	"rspec":     rubyEmitterStarter("ruby/rspec.rb"),
+	"minitest":  rubyEmitterStarter("ruby/minitest.rb"),
+	"test-unit": rubyEmitterStarter("ruby/test-unit.rb"),
 }
 
-var defaultGlobs = map[string]string {
-	"rspec": "spec/**/*spec.rb",
-	"rspec-squashall": "spec/**/*spec.rb",
-	"rspec-pendantic": "spec/**/*spec.rb",
-	"minitest": "test/**/test*.rb",
-	"minitest-squashall": "test/**/test*.rb",
-	"minitest-pendantic": "test/**/test*.rb",
+var defaultGlobs = map[string]string{
+	"rspec":     "spec/**/*spec.rb",
+	"minitest":  "test/**/test*.rb",
 	"test-unit": "test/**/test*.rb",
-	"test-unit-squashall": "test/**/test*.rb",
-	"test-unit-pendantic": "test/**/test*.rb",
 }
 
 func DefaultGlob(name string) string {
@@ -94,18 +56,13 @@ func DefaultGlob(name string) string {
 }
 
 func Resolve(
-	name string,
 	srv *server.Server,
-	passthroughConfig map[string](interface{}),
 	workerEnvs []map[string]string,
-	dir string,
-	env map[string]string,
-	seed int,
-	files []string) (Emitter, error) {
-	starter, ok := starters[name]
+	config runner.Config) (Emitter, error) {
+	starter, ok := starters[config.Name]
 	if !ok {
-		return nil, errors.New("Could not find starter: " + name)
+		return nil, errors.New("Could not find starter: " + config.Name)
 	}
 
-	return starter(srv, passthroughConfig, workerEnvs, dir, env, seed, files)
+	return starter(srv, workerEnvs, config)
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"qa/runner"
-	"qa/runner/server"
 	"qa/tapjio"
 )
 
@@ -19,38 +18,21 @@ type eventUnion struct {
 	error  error
 }
 
-type testSuiteRunner struct {
-	seed    int
-	runners []runner.TestRunner
-	count   int
-	srv     *server.Server
-}
-
-func NewTestSuiteRunner(seed int,
-	srv *server.Server,
-	runners []runner.TestRunner) *testSuiteRunner {
+func Run(
+	visitor tapjio.Visitor,
+	workerEnvs []map[string]string,
+	seed int,
+	runners []runner.TestRunner) (final tapjio.FinalEvent, err error) {
 
 	count := 0
 	for _, runner := range runners {
 		count += runner.TestCount()
 	}
 
-	return &testSuiteRunner{
-		seed:    seed,
-		runners: runners,
-		count:   count,
-		srv:     srv,
-	}
-}
-
-func (self *testSuiteRunner) Run(
-	workerEnvs []map[string]string,
-	visitor tapjio.Visitor) (final tapjio.FinalEvent, err error) {
-
 	numWorkers := len(workerEnvs)
 	startTime := time.Now().UTC()
 
-	suite := tapjio.NewSuiteEvent(startTime, self.count, self.seed)
+	suite := tapjio.NewSuiteEvent(startTime, count, seed)
 	final = *tapjio.NewFinalEvent(suite)
 
 	err = visitor.SuiteStarted(*suite)
@@ -75,9 +57,9 @@ func (self *testSuiteRunner) Run(
 		// near the end of the run by running testRunners with the most tests first, avoiding
 		// scenarios where the last testRunner we run has many tests, causing the entire test
 		// run to drag on needlessly while other workers are idle.
-		runner.By(func(r1, r2 *runner.TestRunner) bool { return (*r2).TestCount() < (*r1).TestCount() }).Sort(self.runners)
+		runner.By(func(r1, r2 *runner.TestRunner) bool { return (*r2).TestCount() < (*r1).TestCount() }).Sort(runners)
 
-		for _, testRunner := range self.runners {
+		for _, testRunner := range runners {
 			testRunnerChan <- testRunner
 		}
 		close(testRunnerChan)

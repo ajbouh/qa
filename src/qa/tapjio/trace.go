@@ -9,12 +9,12 @@ import (
 // Extracts trace events from a tapj stream.
 
 type TraceWriter struct {
-	writer  io.Writer
+	writer  io.WriteCloser
 	encoder *json.Encoder
 	delim   string
 }
 
-func NewTraceWriter(writer io.Writer) *TraceWriter {
+func NewTraceWriter(writer io.WriteCloser) *TraceWriter {
 	return &TraceWriter{
 		writer:  writer,
 		encoder: json.NewEncoder(writer),
@@ -57,5 +57,5 @@ func (t *TraceWriter) TestFinished(event TestEvent) error {
 }
 
 func (t *TraceWriter) End(reason error) error {
-	return nil
+	return t.writer.Close()
 }
