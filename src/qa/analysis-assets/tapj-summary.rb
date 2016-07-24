@@ -349,7 +349,7 @@ ensure
 end
 
 test_summaries = summarizer.summarize(test_results)
-test_summaries.sort_by! { |v| [v["fail_count"], v["total_count"], v["median"].values.max] }.reverse
+test_summaries.sort_by! { |v| [v["fail_count"], v["total_count"], v["id"]] }.reverse
 
 if show_aces
   show = test_summaries

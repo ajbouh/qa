@@ -232,6 +232,14 @@ func TestSummary(t *testing.T) {
 	expectJson := `
 [
 	{
+		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_registration"],
+		"mean": {"pass": 74.846147},
+		"median": {"pass": 74.846147},
+		"std_dev": {"pass": 22.855770061885902},
+		"count": {"pass": 2},
+		"total_count": 2, "pass_count": 2, "fail_count": 0
+	},
+	{
 		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_remembering"],
 		"mean": {"pass": 34.0779615},
 		"median": {"pass": 34.0779615},
@@ -244,14 +252,6 @@ func TestSummary(t *testing.T) {
 		"mean": {"pass": 64.05913749999999},
 		"median": {"pass": 64.05913749999999},
 		"std_dev": {"pass": 23.171006043113454},
-		"count": {"pass": 2},
-		"total_count": 2, "pass_count": 2, "fail_count": 0
-	},
-	{
-		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_registration"],
-		"mean": {"pass": 74.846147},
-		"median": {"pass": 74.846147},
-		"std_dev": {"pass": 22.855770061885902},
 		"count": {"pass": 2},
 		"total_count": 2, "pass_count": 2, "fail_count": 0
 	},
@@ -272,19 +272,19 @@ func TestSummary(t *testing.T) {
 		"total_count": 2, "pass_count": 1, "fail_count": 1
 	},
 	{
-		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestMerges"], "test_slave_interval_scheduler"],
-		"mean": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
-		"median": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
-		"std_dev": {"pass": 0.0, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 0.0},
-		"count": {"pass": 1, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 1},
-		"total_count": 2, "pass_count": 1, "fail_count": 1
-	},
-	{
 	"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestAnnotations"], "test_annotations"],
 		"mean": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
 		"median": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
 		"std_dev": {"pass": 0.0, "error:609635f9467fd88c85143d469a04654025fcdd00": 0.0},
 		"count": {"pass": 1, "error:609635f9467fd88c85143d469a04654025fcdd00": 1},
+		"total_count": 2, "pass_count": 1, "fail_count": 1
+	},
+	{
+		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestMerges"], "test_slave_interval_scheduler"],
+		"mean": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
+		"median": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
+		"std_dev": {"pass": 0.0, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 0.0},
+		"count": {"pass": 1, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 1},
 		"total_count": 2, "pass_count": 1, "fail_count": 1
 	}
 ]

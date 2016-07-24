@@ -88,6 +88,17 @@ func TestDetectFlaky(t *testing.T) {
 	// source code for the line that created the failure.
 	expectJson := `
 [
+	{
+		"id": [null,["Flaky", "flaky context"], "sometimes passes"],
+		"total_count": 5,
+		"pass_count": 1,
+		"fail_count": 4,
+		"count": {
+			"fail:06f925dea38c5ca274b12c43f37545123af2adde": 2,
+			"error:89b04e55d622d5a4ab3bba9eebd421e14cf34ca6": 2,
+			"pass": 1
+		}
+	},
   {
     "id": [null,["MinitestFlakyTest"], "test_flaky"],
     "total_count": 5,
@@ -96,17 +107,6 @@ func TestDetectFlaky(t *testing.T) {
 		"count": {
 			"fail:652307a253faf135a2edef5a09f04ca1c257e31e": 2,
 			"error:887c8597c1e2f3697d2a2d7ebddd57e07d77e013": 2,
-			"pass": 1
-		}
-  },
-  {
-    "id": [null,["Flaky", "flaky context"], "sometimes passes"],
-    "total_count": 5,
-		"pass_count": 1,
-		"fail_count": 4,
-		"count": {
-			"fail:06f925dea38c5ca274b12c43f37545123af2adde": 2,
-			"error:89b04e55d622d5a4ab3bba9eebd421e14cf34ca6": 2,
 			"pass": 1
 		}
   },
