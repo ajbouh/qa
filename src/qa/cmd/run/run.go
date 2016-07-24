@@ -9,8 +9,8 @@ import (
 	"syscall"
 
 	"qa/cmd"
-	"qa/emitter"
 	"qa/runner"
+	"qa/runner/ruby"
 	"qa/runner/server"
 	"qa/suite"
 	"qa/tapjio"
@@ -24,19 +24,56 @@ type Env struct {
 	Server        *server.Server
 }
 
+type contextStarter func(
+	srv *server.Server,
+	workerEnvs []map[string]string,
+	runnerConfig runner.Config) (runner.Context, error)
+
+func rubyContextStarter(runnerAssetName string) contextStarter {
+	return func(
+		srv *server.Server,
+		workerEnvs []map[string]string,
+		runnerConfig runner.Config) (runner.Context, error) {
+
+		config := &ruby.ContextConfig{
+			RunnerConfig:    runnerConfig,
+			Rubylib:         []string{"spec", "lib", "test"},
+			RunnerAssetName: runnerAssetName,
+		}
+
+		ctx, err := ruby.StartContext(srv, workerEnvs, config)
+		if err != nil {
+			return nil, err
+		}
+
+		return ctx, nil
+	}
+}
+
+var starters = map[string]contextStarter{
+	"rspec":     rubyContextStarter("ruby/rspec.rb"),
+	"minitest":  rubyContextStarter("ruby/minitest.rb"),
+	"test-unit": rubyContextStarter("ruby/test-unit.rb"),
+}
+
 func Run(env *Env) (tapjio.FinalEvent, error) {
 	var final tapjio.FinalEvent
 
 	var testRunners []runner.TestRunner
 	for _, runnerConfig := range env.RunnerConfigs {
-		em, err := emitter.Resolve(env.Server, env.WorkerEnvs, runnerConfig)
-		defer em.Close()
+		starter, ok := starters[runnerConfig.Name]
+		if !ok {
+			return final, errors.New("Could not find starter: " + runnerConfig.Name)
+		}
+
+		ctx, err := starter(env.Server, env.WorkerEnvs, runnerConfig)
+		defer ctx.Close()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error! %v\n", err)
 			return final, err
 		}
 
-		traceEvents, runners, err := em.EnumerateTests()
+		traceEvents, runners, err := ctx.EnumerateRunners()
 		if err != nil {
 			return final, err
 		}

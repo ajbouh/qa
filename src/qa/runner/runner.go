@@ -117,3 +117,8 @@ type Config struct {
 func (f *Config) Files() ([]string, error) {
 	return f.FileLister.ListFiles()
 }
+
+type Context interface {
+	EnumerateRunners() ([]tapjio.TraceEvent, []TestRunner, error)
+	Close() error
+}

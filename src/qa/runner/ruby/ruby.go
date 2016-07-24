@@ -25,7 +25,7 @@ type context struct {
 	config    *ContextConfig
 }
 
-func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[string]string) (*context, error) {
+func StartContext(server *server.Server, workerEnvs []map[string]string, cfg *ContextConfig) (*context, error) {
 	requestCh := make(chan interface{}, 1)
 
 	runnerCfg := cfg.RunnerConfig
@@ -90,6 +90,9 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 	if err != nil {
 		return nil, err
 	}
+	go func() {
+		cmd.Process.Wait()
+	}()
 
 	return &context{
 		requestCh: requestCh,
@@ -100,20 +103,20 @@ func StartContext(cfg *ContextConfig, server *server.Server, workerEnvs []map[st
 }
 
 // TODO(adamb) Should also cancel all existing waitgroups
-func (self *context) Close() (err error) {
+func (self *context) Close() error {
 	close(self.requestCh)
 
 	if self.process != nil {
-		err = self.process.Kill()
+		err := self.process.Kill()
 		if err != nil {
-			_, err = self.process.Wait()
+			return err
 		}
 	}
 
-	return
+	return nil
 }
 
-func (self *context) EnumerateTests() (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
+func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 

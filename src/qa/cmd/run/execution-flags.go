@@ -9,10 +9,15 @@ import (
 	"strings"
 
 	"qa/cmd"
-	"qa/emitter"
 	"qa/runner"
 	"qa/runner/server"
 )
+
+var defaultGlobs = map[string]string{
+	"rspec":     "spec/**/*spec.rb",
+	"minitest":  "test/**/test*.rb",
+	"test-unit": "test/**/test*.rb",
+}
 
 type executionFlags struct {
 	jobs                *int
@@ -101,7 +106,7 @@ func (f *executionFlags) RunnerConfigs(env *cmd.Env, runnerSpecs []string) []run
 		runnerName := runnerSpecSplit[0]
 		var lister runner.FileLister
 		if len(runnerSpecSplit) == 1 {
-			lister = runner.NewFileGlob(env.Dir, []string{emitter.DefaultGlob(runnerName)})
+			lister = runner.NewFileGlob(env.Dir, []string{defaultGlobs[runnerName]})
 		} else {
 			lister = runner.NewFileGlob(env.Dir, runnerSpecSplit[1:])
 		}
