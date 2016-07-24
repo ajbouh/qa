@@ -7,6 +7,7 @@
           "vendor/go-bindata:go-bindata",
 
           // For testing.
+          "vendor/watchman:watchman",
           "vendor/ruby:ruby",
           "vendor/minitest:minitest",
           "vendor/test-unit:test-unit",
