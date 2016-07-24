@@ -1229,7 +1229,7 @@ class ::Qa::TestEngine
     eval(eval_before_fork) unless eval_before_fork.empty?
 
     # Delegate prefork actions.
-    @prefork.call(initial_files)
+    @prefork.call(initial_files || [])
 
     conserved = ::Qa::ConservedInstancesSet.new
 
