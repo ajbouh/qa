@@ -14,7 +14,7 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 4. Investigate test performance by generating flamegraphs (or icicle graph) for the entire testrun. See `-save-flamegraph`, `-save-icegraph`, and `-save-palette`.
 
-5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each *method* in a separate child process. (Versus each *case* in its own worker process.)
+5. Run your tests in parallel. QA does this for you automatically. Use the `-squash` option to specify how tests are squashed into worker processes. The default is `file`. Use `all` to squish everything into a single worker process (effectively disabling parallel test running), or `none` to run every test in a separate worker process.
 
 6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive-base-dir` option for `qa run` records test outcomes across different runs. Use the `qa flaky` command with the same `-archive-base-dir` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
 
@@ -26,6 +26,8 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 10. Automatically partition Rails tests across multiple databases, one per worker (Using custom ActiveRecord integration logic). If the required test databases do not exist, they will be setup automatically before tests begin. NOTE This functionality is highly experimental. Disable it with `-warmup=false`. Please [open an issue](https://github.com/ajbouh/qa/issues/new) if you have trouble.
 
+11. A faster and more focused development cycle. QA can prioritize test ordering based on the test files you're changing with `qa auto`.
+
 ## What languages and test frameworks does QA support?
 
 Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler. For example, if you're using rspec:
@@ -35,7 +37,7 @@ bundle exec qa run rspec
 
 ## What will QA help me do tomorrow?
 
-1. A faster and more focused development cycle. QA will prioritize test ordering based on the files you're changing and what's failed recently.
+1. An even faster and more focused development cycle. QA will prioritize test ordering based on dependencies of the files you're changing and what's failed recently.
 
 2. Run your tests *even faster*. QA will package your test execution environment, run it on a massive fleet of remote machines (like [AWS Lambda](https://aws.amazon.com/lambda/)) and stream the results back to your terminal in real time.
 
@@ -67,6 +69,10 @@ Example usage and output:
 ```
 > cd $project
 > qa run minitest
+...
+> qa run -archive-base-dir ~/.qa/archive minitest
+...
+> qa flaky -archive-base-dir ~/.qa/archive
 ...
 ```
 
@@ -133,9 +139,11 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [ ] Suggests which flaky tests to debug first (based on heuristics)
 
 ### Local development
+- [x] Automatically run tests as you save changes to them.
+- [ ] Automatically run tests as you save changes to any of their file-level dependencies.
+- [ ] Automatically run tests as you change individual test methods or dependencies of those methods.
 - [ ] Order test run during local development based on what's failed recently
 - [ ] Line-level code coverage report
-- [ ] Rerunning tests during local development affected by what code you just modified (test code or AUT, using code coverage analysis)
 - [ ] Limit tests to files that are open in editor (open test files, open AUT files, etc)
 - [ ] Can run with git-bisect to search for commit that introduced a bug
 - [ ] Suggest which failing tests to debug first (based on heuristics)
