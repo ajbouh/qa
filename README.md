@@ -84,6 +84,33 @@ Flaky tests sap your confidence in the rest of your tests. Their existence robs 
 
 So that's the bad news: by their very nature, flaky tests are hard to avoid. In many cases they start out looking like healthy tests. But when running on a machine under heavy load, they rear their ugly, randomly failing heads.  In some cases they may only fail when the network is saturated. (Which is a reason to avoid tests that rely on third party services in the first place.) Or the opposite could happen: you upgrade a dependency or language runtime to a faster version, and this speeds up the testrun enough to unveil latent flakiness you never recognized. Such are the perverse economics of flaky tests.
 
+## How do I use QA to detect flaky tests?
+An example session
+```
+$ qa run -archive-base-dir ~/.qa/archive
+  # ... unexpected test failure
+$ qa run -archive-base-dir ~/.qa/archive
+  # ... that same test now passes
+```
+
+To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `-archive-base-dir` as given to `qa run`. For example, continuing the session from above:
+
+```
+$ qa flaky -archive-base-dir ~/.qa/archive
+```
+
+## How does QA detect flaky tests?
+
+At a high level, QA considers a test to be flaky if, for a particular code revision, that test has both passed and failed. That's why you should provide a `-suite-coderef` value to `qa run`.
+
+At a low level, QA uses a few tricks to find as many examples of a flaky failure as it can. The actual algorithm for discovering flaky tests is:
+- Fingerprint all failures using:
+  - class of the failure (e.g. Exception, AssertionFailed, etc.)
+  - line of source code that generated the failure (but not line number)
+  - method and file names present in the stack trace (but not line numbers)
+- Find all tests that, for a single revision, have both passed and failed.
+- Put test failures from different revisions in the same bucket if their fingerprint matches a known flaky test
+
 ## How will QA help me with test flakiness?
 Now the good news: with QA, we've set out to address the shortcomings we see with today's testing tools. We want a toolset that's *fast* and gives us more firepower for dealing with the reality of flaky tests.
 
