@@ -41,6 +41,8 @@ func TestDetectFlaky(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	qaRunArgs := []string{
+		"-suite-label", "my-flaky-suite",
+		"-suite-coderef", "r1",
 		"-archive-base-dir", dir,
 		"rspec",
 		"minitest:test/minitest/**/test*.rb",
@@ -73,6 +75,9 @@ func TestDetectFlaky(t *testing.T) {
 	env.Vars["QA_FLAKY_2"] = "true"
 	// Expect a different kind of flaky (assertion) fail for each test type
 	run.Main(env, qaRunArgs)
+	qaRunArgs[3] = "r2"
+	// Expect a failure similar to above, but still counted with r1.
+	run.Main(env, qaRunArgs)
 
 	gotSummary, err := qaFlaky("-archive-base-dir", dir, "-format", "json", "-show-aces=false")
 	if err != nil {
@@ -89,34 +94,34 @@ func TestDetectFlaky(t *testing.T) {
 	expectJson := `
 [
 	{
-		"id": [null,["Flaky", "flaky context"], "sometimes passes"],
-		"total_count": 5,
-		"pass_count": 1,
-		"fail_count": 4,
+		"id": ["my-flaky-suite", ["Flaky", "flaky context"], "sometimes passes"],
+		"total-count": 6,
+		"pass-count": 1,
+		"fail-count": 5,
 		"count": {
-			"fail:06f925dea38c5ca274b12c43f37545123af2adde": 2,
+			"fail:06f925dea38c5ca274b12c43f37545123af2adde": 3,
 			"error:89b04e55d622d5a4ab3bba9eebd421e14cf34ca6": 2,
 			"pass": 1
 		}
 	},
   {
-    "id": [null,["MinitestFlakyTest"], "test_flaky"],
-    "total_count": 5,
-		"pass_count": 1,
-		"fail_count": 4,
+    "id": ["my-flaky-suite", ["MinitestFlakyTest"], "test_flaky"],
+    "total-count": 6,
+		"pass-count": 1,
+		"fail-count": 5,
 		"count": {
-			"fail:652307a253faf135a2edef5a09f04ca1c257e31e": 2,
+			"fail:652307a253faf135a2edef5a09f04ca1c257e31e": 3,
 			"error:887c8597c1e2f3697d2a2d7ebddd57e07d77e013": 2,
 			"pass": 1
 		}
   },
   {
-    "id": [null,["TestUnitFlakyTest"], "test_flaky"],
-    "total_count": 5,
-		"pass_count": 1,
-		"fail_count": 4,
+    "id": ["my-flaky-suite", ["TestUnitFlakyTest"], "test_flaky"],
+    "total-count": 6,
+		"pass-count": 1,
+		"fail-count": 5,
 		"count": {
-			"fail:d1d54656aa2d7b8ed73234ebe9aab74c99d5ec68": 2,
+			"fail:d1d54656aa2d7b8ed73234ebe9aab74c99d5ec68": 3,
 			"error:32c191ce5c990cc7fe7c81c02a5036b7183f0715": 2,
 			"pass": 1
 		}
@@ -128,7 +133,7 @@ func TestDetectFlaky(t *testing.T) {
 		t.Fatal("Couldn't parse expected summary", err)
 	}
 
-	require.Equal(t, len(expectedSummary), len(summaries), "Wrong number of entries in summary")
+	require.Equal(t, len(expectedSummary), len(summaries), "Wrong number of entries in summary: %v", summaries)
 
 	for ix, expectedFields := range expectedSummary {
 		gotFields := summaries[ix]

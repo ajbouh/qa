@@ -35,6 +35,8 @@ type SuiteEvent struct {
 	Count int    `json:"count"`
 	Seed  int    `json:"seed"`
 	Rev   int    `json:"rev"`
+	Label string `json:"label,omitempty"`
+	Coderef string `json:"coderef,omitempty"`
 }
 
 func NewSuiteEvent(startTime time.Time, count int, seed int) *SuiteEvent {

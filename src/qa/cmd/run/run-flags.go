@@ -12,7 +12,9 @@ type runFlags struct {
 	outputFlags    *outputFlags
 	executionFlags *executionFlags
 
-	chdir *string
+	chdir          *string
+	suiteCoderef   *string
+	suiteLabel     *string
 }
 
 func DefineFlags(flags *flag.FlagSet) *runFlags {
@@ -20,6 +22,8 @@ func DefineFlags(flags *flag.FlagSet) *runFlags {
 		outputFlags:    defineOutputFlags(flags),
 		executionFlags: defineExecutionFlags(flags),
 		chdir:          flags.String("chdir", "", "Change to the given directory"),
+		suiteCoderef:   flags.String("suite-coderef", "", "Set coderef for suite (useful for flakiness detection)"),
+		suiteLabel:     flags.String("suite-label", "", "Set label for suite (useful for flakiness detection)"),
 	}
 }
 
@@ -57,6 +61,8 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerSpecs []string) (*Env, error) {
 
 	return &Env{
 		Seed:          *executionFlags.seed,
+		SuiteLabel:    *f.suiteLabel,
+		SuiteCoderef:  *f.suiteCoderef,
 		WorkerEnvs:    executionFlags.WorkerEnvs(),
 		RunnerConfigs: executionFlags.RunnerConfigs(&e, runnerSpecs),
 		Visitor:       visitor,

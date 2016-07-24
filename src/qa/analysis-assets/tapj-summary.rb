@@ -76,9 +76,9 @@ class Summarizer
   # Example:
   # { "platform/spin/verification/ui-conversation-window+macosx+x86_64:SkyonBlacklistTest:test_skyon_blacklist" => {
   #     "observations" => [{ "status" => "pass", "time" => 3.454566 }],
-  #     "total_count" => 1,
-  #     "pass_count" => 1,
-  #     "fail_count" => 0,
+  #     "total-count" => 1,
+  #     "pass-count" => 1,
+  #     "fail-count" => 0,
   #     "summary" => {
   #       "pass" => { "mean" => 3.454566, "median" => 3.454566, "std_dev" => 0,
   #           "observations" => 1 }
@@ -104,11 +104,11 @@ class Summarizer
           end
         end
       end
-      summary["outcome_digests"] = groups.keys
+      summary["outcome-digests"] = groups.keys
 
-      summary["total_count"] = observations.length
-      summary["pass_count"] = observations.count(&@success_if_proc)
-      summary["fail_count"] = observations.length - summary["pass_count"]
+      summary["total-count"] = observations.length
+      summary["pass-count"] = observations.count(&@success_if_proc)
+      summary["fail-count"] = observations.length - summary["pass-count"]
     end
 
     test_summaries
@@ -154,14 +154,14 @@ end
 require 'pp'
 
 class Printer
-  def print_summary(test_summaries, other_count)
+  def print_summary(test_summaries, aces_count)
     format = "%8s %8s  %-100s %15s %15s %15s\n"
     printf(format,
         "PassRt", "Count", "Description", "Mean (s)", "Med (s)", "StdDev (s)")
 
     test_summaries.each { |details| print_test_summary(details, format) }
 
-    puts "#{other_count} other tests with no failures." if other_count > 0
+    puts "#{aces_count} other tests with no failures." if aces_count && aces_count > 0
   end
 
   def print_test_id_detail(test_summaries, test_id)
@@ -184,8 +184,8 @@ class Printer
   end
 
   def print_test_summary(test_details, format)
-    total_count = test_details["total_count"]
-    pass_count = test_details["pass_count"]
+    total_count = test_details["total-count"]
+    pass_count = test_details["pass-count"]
     pass_rate = format_percentage(pass_count, total_count)
 
     printf(format,
@@ -210,7 +210,7 @@ class Printer
     end
     printf(format, "", "", outcomes, "", "", "")
 
-    outcome_digests = test_details["outcome_digests"].sort_by do |outcome_digest|
+    outcome_digests = test_details["outcome-digests"].sort_by do |outcome_digest|
       test_details["count"][outcome_digest]
     end.reverse
 
@@ -317,7 +317,7 @@ about tapj tests.
 
   opts.on("--[no-]show-aces",
       "Specify whether to print details for tests without failures."\
-      " Defaults to not printing details.") do |b|
+      " Defaults to printing details.") do |b|
     show_aces = b
   end
 
@@ -349,15 +349,14 @@ ensure
 end
 
 test_summaries = summarizer.summarize(test_results)
-test_summaries.sort_by! { |v| [v["fail_count"], v["total_count"], v["id"]] }.reverse
+test_summaries.sort_by! { |v| [v["fail-count"], v["total-count"], v["id"]] }.reverse
 
 if show_aces
   show = test_summaries
 else
-  show = test_summaries.select { |v| v["fail_count"] > 0 }
-  aces = test_summaries.select { |v| v["fail_count"] == 0 }
+  show = test_summaries.select { |v| v["fail-count"] > 0 }
+  hidden_aces = test_summaries.select { |v| v["fail-count"] == 0 }
 end
-
 
 case format.downcase
 when 'pretty'
@@ -366,7 +365,9 @@ when 'pretty'
   if test_id
     printer.print_test_id_detail(show, test_id)
   else
-    printer.print_summary(show, aces.length)
+    printer.print_summary(
+      show,
+      hidden_aces && hidden_aces.length)
   end
 when 'json'
   puts JSON.generate(show)

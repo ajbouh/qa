@@ -7,17 +7,19 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"qa/cmd"
 	"qa/runner"
 	"qa/runner/ruby"
 	"qa/runner/server"
-	"qa/suite"
 	"qa/tapjio"
 )
 
 type Env struct {
 	Seed          int
+	SuiteLabel    string
+	SuiteCoderef  string
 	WorkerEnvs    []map[string]string
 	RunnerConfigs []runner.Config
 	Visitor       tapjio.Visitor
@@ -58,8 +60,11 @@ var starters = map[string]contextStarter{
 
 func Run(env *Env) (tapjio.FinalEvent, error) {
 	var final tapjio.FinalEvent
+	startTime := time.Now().UTC()
+	visitor := env.Visitor
 
 	var testRunners []runner.TestRunner
+	count := 0
 	for _, runnerConfig := range env.RunnerConfigs {
 		starter, ok := starters[runnerConfig.Name]
 		if !ok {
@@ -78,9 +83,12 @@ func Run(env *Env) (tapjio.FinalEvent, error) {
 			return final, err
 		}
 
+		for _, runner := range runners {
+			count += runner.TestCount()
+		}
+
 		testRunners = append(testRunners, runners...)
 
-		visitor := env.Visitor
 		for _, traceEvent := range traceEvents {
 			err := visitor.TraceEvent(traceEvent)
 			if err != nil {
@@ -89,7 +97,25 @@ func Run(env *Env) (tapjio.FinalEvent, error) {
 		}
 	}
 
-	return suite.Run(env.Visitor, env.WorkerEnvs, env.Seed, testRunners)
+	suiteEvent := tapjio.NewSuiteEvent(startTime, count, env.Seed)
+	suiteEvent.Label = env.SuiteLabel
+	suiteEvent.Coderef = env.SuiteCoderef
+	err := visitor.SuiteStarted(*suiteEvent)
+	if err != nil {
+		return final, err
+	}
+
+	final = *tapjio.NewFinalEvent(suiteEvent)
+	err = runner.RunAll(visitor, env.WorkerEnvs, final.Counts, testRunners)
+
+	final.Time = time.Now().UTC().Sub(startTime).Seconds()
+
+	finalErr := visitor.SuiteFinished(final)
+	if err == nil {
+		err = finalErr
+	}
+
+	return final, err
 }
 
 func Main(env *cmd.Env, args []string) error {

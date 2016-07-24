@@ -92,10 +92,11 @@ func Main(env *cmd.Env, args []string) error {
 
 	archiveBaseDirDefault := path.Join(usr.HomeDir, ".qa", "archive")
 	archiveBaseDir := flags.String("archive-base-dir", archiveBaseDirDefault, "Base directory to store data for later analysis")
-	collapseId := flags.String("collapse-id", "suite.coderef,case-labels,label", "Collapse id to use to consolidate tests")
+	filterCollapseId := flags.String("filter-collapse-id", "suite.coderef,suite.label,case-labels,label", "Collapse id to use to consolidate tests")
+	summaryCollapseId := flags.String("summary-collapse-id", "suite.label,case-labels,label", "Collapse id to use to consolidate tests")
 	numDays := flags.Int("days-back", 7, "Number of days to search backwards from -until-date")
 	format := flags.String("format", "pretty", "Format to display summary in, options are: pretty, json")
-	showAces := flags.Bool("show-aces", true, "Whether or not to show passes that always pass")
+	showAces := flags.Bool("show-aces", false, "Whether or not to show tests that always pass")
 
 	now := time.Now()
 	untilDate := flags.String("until-date", now.Format("2006-01-02"), "Date (YYYY-MM-DD) to search -archive-base-dir backwards from")
@@ -134,9 +135,8 @@ func Main(env *cmd.Env, args []string) error {
 			pipelineOp{
 				main: grouping.Main,
 				args: []string{
-					"--collapse-id", *collapseId,
+					"--collapse-id", *filterCollapseId,
 					"--keep-if-any", "status==\"pass\"",
-					// XXX(adamb) Really need to make sure that outcome-digest includes at least the line of source code from the first error.
 					"--keep-residual-records-matching-kept", "outcome-digest",
 				},
 			},
@@ -147,7 +147,7 @@ func Main(env *cmd.Env, args []string) error {
 					acesArg,
 					"--duration", "time",
 					"--sort-by", "suite.start",
-					"--group-by", *collapseId,
+					"--group-by", *summaryCollapseId,
 					"--subgroup-by", "outcome-digest",
 					"--ignore-if", "status==\"todo\"",
 					"--ignore-if", "status==\"omit\"",
