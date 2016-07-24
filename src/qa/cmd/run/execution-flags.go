@@ -79,7 +79,7 @@ func defineExecutionFlags(flags *flag.FlagSet) *executionFlags {
 		errorsCaptureLocals: flags.String("errors-capture-locals", "false", "Use runtime debug API to capture locals from stack when raising errors"),
 		captureStandardFds:  flags.Bool("capture-standard-fds", true, "Capture stdout and stderr"),
 		evalBeforeFork:      flags.String("eval-before-fork", "", "Execute the given code before forking any workers or loading any files"),
-		evalAfterFork:       flags.String("eval-after-fork", "", "Execute the given code after a work forks, but before work begins"),
+		evalAfterFork:       flags.String("eval-after-fork", "", "Execute the given code after a worker forks, but before work begins"),
 		sampleStack:         flags.Bool("sample-stack", false, "Enable stack sampling"),
 		warmup:              flags.Bool("warmup", false, "Use a variety of experimental heuristics to warm up worker caches"),
 	}
