@@ -6,5 +6,5 @@ import (
 )
 
 func Main(env *cmd.Env, args []string) error {
-  return analysis.RunRuby(env, "tapj-grouping.rb", args...)
+	return analysis.RunRuby(env, "tapj-grouping.rb", args...)
 }

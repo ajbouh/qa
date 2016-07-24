@@ -8,7 +8,7 @@ import (
 
 //go:generate go-bindata -o $GOGENPATH/qa/analysis/assets/bindata.go -pkg assets -prefix ../analysis-assets/ ../analysis-assets/...
 
-func RunRuby(env *cmd.Env, runType string, args... string) error {
+func RunRuby(env *cmd.Env, runType string, args ...string) error {
 	data, err := assets.Asset(runType)
 	if err != nil {
 		return err

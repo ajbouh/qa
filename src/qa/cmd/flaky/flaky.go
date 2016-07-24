@@ -1,9 +1,9 @@
 package flaky
 
 import (
-	"io"
 	"flag"
 	"fmt"
+	"io"
 	"os/user"
 	"path"
 	"qa/cmd"
@@ -38,7 +38,7 @@ func runPipeline(env *cmd.Env, ops []pipelineOp) error {
 
 		var opEnv *cmd.Env
 		var closer io.Closer
-		if ix == len(ops) - 1 {
+		if ix == len(ops)-1 {
 			opEnv = &cmd.Env{Stdin: stdin, Stdout: env.Stdout, Stderr: stderrWr}
 		} else {
 			rd, wr := io.Pipe()

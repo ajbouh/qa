@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"testing"
 	"qa/cmd"
 	"qa/cmd/discover"
 	"qa/cmd/grouping"
 	"qa/cmd/summary"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +31,7 @@ func decodeJsonLines(r io.Reader) ([]interface{}, error) {
 	return objs, nil
 }
 
-func qaGrouping(input []interface{}, args ... string) ([]interface{}, error) {
+func qaGrouping(input []interface{}, args ...string) ([]interface{}, error) {
 	var stdin bytes.Buffer
 	encoder := json.NewEncoder(&stdin)
 	for _, obj := range input {
@@ -55,7 +55,7 @@ func qaGrouping(input []interface{}, args ... string) ([]interface{}, error) {
 	return got, nil
 }
 
-func checkGrouping(t *testing.T, message string, expect []interface{}, input []interface{}, args ... string) {
+func checkGrouping(t *testing.T, message string, expect []interface{}, input []interface{}, args ...string) {
 	var got [](interface{})
 	var err error
 	got, err = qaGrouping(input, args...)
@@ -72,7 +72,7 @@ const eventsJson = `{"str": "string", "id": "0"}
 {"str": "string", "id": 3.1, "one": 1, "str2": "string", "composite": {}}
 {"str": "string", "id": 4, "one": 1, "composite": {"a": [1]}}
 {"str": "string", "id": 5, "one": false}
-`;
+`
 
 // test collapse-id & keep-if-any
 func TestKeepIfAny(t *testing.T) {
@@ -129,15 +129,15 @@ func TestSecondaryWhitelist(t *testing.T) {
 	checkGrouping(t, "Exercise --keep-residual-records-matching-kept",
 		[]interface{}{events[4], events[2]},
 		events, "--collapse-id", "id", "--keep-if-any", "id==4",
-			"--keep-residual-records-matching-kept", "composite,one")
+		"--keep-residual-records-matching-kept", "composite,one")
 
 	checkGrouping(t, "Nested keys should work for --keep-residual-records-matching-kept",
 		[]interface{}{events[3], events[4], events[1], events[2]},
 		events, "--collapse-id", "id", "--keep-if-any", "id==4", "--keep-if-any", "id==3.1",
-			"--keep-residual-records-matching-kept", "composite.a,one")
+		"--keep-residual-records-matching-kept", "composite.a,one")
 }
 
-func qaDiscover(args ... string) ([]interface{}, error) {
+func qaDiscover(args ...string) ([]interface{}, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	var err error
@@ -155,7 +155,7 @@ func qaDiscover(args ... string) ([]interface{}, error) {
 	return got, nil
 }
 
-func qaSummary(input []interface{}, args ... string) ([]map[string](interface{}), error) {
+func qaSummary(input []interface{}, args ...string) ([]map[string](interface{}), error) {
 	var stdin bytes.Buffer
 	encoder := json.NewEncoder(&stdin)
 	for _, obj := range input {

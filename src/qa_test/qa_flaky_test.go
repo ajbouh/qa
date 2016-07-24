@@ -7,16 +7,16 @@ import (
 
 	"io/ioutil"
 	"os"
-	"testing"
 	"qa/cmd"
 	"qa/cmd/flaky"
 	"qa/cmd/run"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func qaFlaky(args ... string) (interface{}, error) {
+func qaFlaky(args ...string) (interface{}, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	env := &cmd.Env{Stdout: &stdout, Stderr: &stderr}
@@ -52,8 +52,8 @@ func TestDetectFlaky(t *testing.T) {
 	env := &cmd.Env{
 		Stderr: &stderrBuf,
 		Stdout: &stdoutBuf,
-		Dir: "fixtures/ruby/flaky",
-		Vars: map[string]string{},
+		Dir:    "fixtures/ruby/flaky",
+		Vars:   map[string]string{},
 	}
 
 	env.Vars["QA_FLAKY_1"] = "true"
