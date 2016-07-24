@@ -13,12 +13,6 @@ import (
 	"syscall"
 )
 
-// When watchman emits an event, execute a qa run for that test
-// Expect:
-// {
-//   "version":   "1.6",
-//   "subscribe": "mysubscriptionname"
-// }
 type eventFileLister fileevents.Event
 
 func (s eventFileLister) Dir() string {
@@ -37,7 +31,7 @@ func (s eventFileLister) ListFiles() ([]string, error) {
 	return s.Patterns(), nil
 }
 
-func pruneRunEnvForFiles(
+func runEnvForEvent(
 	runEnv *run.Env,
 	runnerConfig runner.Config,
 	event *fileevents.Event) *run.Env {
@@ -62,13 +56,17 @@ func subscribeToRunnerConfigFiles(watcher fileevents.Watcher, runnerConfig runne
 		return nil, err
 	}
 
-	expr := map[string](interface{}){
-		"expression": []string{"match", runnerConfig.FileLister.Patterns()[0], "wholename"},
-		"fields":     []string{"name", "new", "exists"},
-		"defer_vcs":  true,
+	expression := []interface{}{"anyof"}
+
+	for _, pattern := range runnerConfig.FileLister.Patterns() {
+		expression = append(expression, []string{"match", pattern, "wholename"})
 	}
 
-	return watcher.Subscribe(dir, "tests", expr)
+	return watcher.Subscribe(dir, "tests", map[string](interface{}){
+		"expression": expression,
+		"fields":     []string{"name", "new", "exists"},
+		"defer_vcs":  true,
+	})
 }
 
 func Main(env *cmd.Env, args []string) error {
@@ -122,13 +120,12 @@ func Main(env *cmd.Env, args []string) error {
 
 		go func(sub *fileevents.Subscription, runnerConfig runner.Config) {
 			for event := range sub.Events {
-				runEnvChan <- pruneRunEnvForFiles(runEnv, runnerConfig, event)
+				runEnvChan <- runEnvForEvent(runEnv, runnerConfig, event)
 			}
 		}(sub, runnerConfig)
 	}
 
-	// Figure out which file changed. If file that changed matches the existing glob,
-	// start running that test.
+	// Try to run each runEnv sequentially.
 	for runEnv := range runEnvChan {
 		_, err := run.Run(runEnv)
 		if err != nil {
