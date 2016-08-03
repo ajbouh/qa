@@ -16,7 +16,7 @@ import (
 //go:generate go-bindata -o $GOGENPATH/qa/runner/assets/bindata.go -pkg assets -prefix ../runner-assets/ ../runner-assets/...
 
 type TestRunner interface {
-	Run(env map[string]string, callbacks tapjio.DecodingCallbacks) error
+	Run(env map[string]string, visitor tapjio.Visitor) error
 	TestCount() int
 }
 
@@ -156,7 +156,7 @@ func RunAll(
 		close(testRunnerChan)
 	}()
 
-	var abort = false
+	var quitChan = make(chan struct{})
 	var eventChan = make(chan eventUnion, numWorkers)
 
 	var awaitJobs sync.WaitGroup
@@ -167,34 +167,34 @@ func RunAll(
 		go func() {
 			defer awaitJobs.Done()
 			for testRunner := range testRunnerChan {
-				if abort {
+				select {
+				case <-quitChan:
 					for i := testRunner.TestCount(); i > 0; i-- {
 						eventChan <- eventUnion{error: errors.New("already aborted")}
 					}
-				} else {
-					var awaitRun sync.WaitGroup
-					awaitRun.Add(1)
-					testRunner.Run(
-						env,
-						tapjio.DecodingCallbacks{
-							OnTestBegin: func(test tapjio.TestStartedEvent) error {
-								eventChan <- eventUnion{nil, &test, nil, nil}
-								return nil
-							},
-							OnTest: func(test tapjio.TestEvent) error {
-								eventChan <- eventUnion{nil, nil, &test, nil}
-								return nil
-							},
-							OnTrace: func(trace tapjio.TraceEvent) error {
-								eventChan <- eventUnion{&trace, nil, nil, nil}
-								return nil
-							},
-							OnEnd: func(reason error) error {
-								awaitRun.Done()
-								return nil
-							},
-						})
-					awaitRun.Wait()
+					continue
+				default:
+				}
+
+				err := testRunner.Run(
+					env,
+					&tapjio.DecodingCallbacks{
+						OnTestBegin: func(test tapjio.TestStartedEvent) error {
+							eventChan <- eventUnion{nil, &test, nil, nil}
+							return nil
+						},
+						OnTest: func(test tapjio.TestEvent) error {
+							eventChan <- eventUnion{nil, nil, &test, nil}
+							return nil
+						},
+						OnTrace: func(trace tapjio.TraceEvent) error {
+							eventChan <- eventUnion{&trace, nil, nil, nil}
+							return nil
+						},
+					})
+
+				if err != nil {
+					eventChan <- eventUnion{nil, nil, nil, err}
 				}
 			}
 		}()
@@ -223,22 +223,24 @@ func RunAll(
 			continue
 		}
 
-		err = eventUnion.error
-		if err == nil {
-			test := eventUnion.finish
-			tally.Increment(test.Status)
+		test := eventUnion.finish
 
-			err = visitor.TestFinished(*test)
-			if err != nil {
-				return
+		if eventUnion.error != nil {
+			test = &tapjio.TestEvent{
+				Type:   "test",
+				Time:   0,
+				Label:  "<internal error: " + eventUnion.error.Error() + ">",
+				Status: tapjio.Error,
+				Exception: &tapjio.TestException{
+					Message: eventUnion.error.Error(),
+				},
 			}
-			continue
 		}
 
+		tally.Increment(test.Status)
+
+		err = visitor.TestFinished(*test)
 		if err != nil {
-			abort = true
-			tally.Increment(tapjio.Error)
-			fmt.Fprintln(os.Stderr, "Error:", err)
 			return
 		}
 	}

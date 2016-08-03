@@ -20,12 +20,14 @@ type ContextConfig struct {
 
 type context struct {
 	requestCh chan interface{}
-	server    *server.Server
+	srv       *server.Server
+	addresses []string
 	process   *os.Process
 	config    *ContextConfig
+	mutex     *sync.Mutex
 }
 
-func StartContext(server *server.Server, workerEnvs []map[string]string, cfg *ContextConfig) (*context, error) {
+func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *ContextConfig) (*context, error) {
 	requestCh := make(chan interface{}, 1)
 
 	runnerCfg := cfg.RunnerConfig
@@ -51,11 +53,15 @@ func StartContext(server *server.Server, workerEnvs []map[string]string, cfg *Co
 	for _, lib := range cfg.Rubylib {
 		args = append(args, "-I", lib)
 	}
+	address, err := srv.ExposeChannel(requestCh)
+	if err != nil {
+		return nil, err
+	}
 	args = append(args,
 		"-e", sharedCode,
 		"-e", runnerCode,
 		"--",
-		server.ExposeChannel(requestCh))
+		address)
 
 	// First request is a list of worker environments and list of all test files to require.
 	requestCh <- map[string](interface{}){
@@ -90,21 +96,38 @@ func StartContext(server *server.Server, workerEnvs []map[string]string, cfg *Co
 	if err != nil {
 		return nil, err
 	}
+
+	ctx := &context{
+		requestCh: requestCh,
+		addresses: []string{},
+		srv:       srv,
+		config:    cfg,
+		process:   cmd.Process,
+		mutex:     &sync.Mutex{},
+	}
+
 	go func() {
+		defer ctx.cleanupAfterProcessDone()
 		cmd.Process.Wait()
 	}()
 
-	return &context{
-		requestCh: requestCh,
-		server:    server,
-		config:    cfg,
-		process:   cmd.Process,
-	}, nil
+	return ctx, nil
+}
+
+func (self *context) cleanupAfterProcessDone() {
+	m := self.mutex
+	m.Lock()
+	self.process = nil
+	m.Unlock()
+
+	self.cancelAllVisitorSubscriptions()
 }
 
 // TODO(adamb) Should also cancel all existing waitgroups
 func (self *context) Close() error {
-	close(self.requestCh)
+	m := self.mutex
+	m.Lock()
+	defer m.Unlock()
 
 	if self.process != nil {
 		err := self.process.Kill()
@@ -117,12 +140,9 @@ func (self *context) Close() error {
 }
 
 func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-
 	cfg := self.config
 	var currentRunner *rubyRunner
-	serverAddress := self.server.Decode(&tapjio.DecodingCallbacks{
+	serverAddress, errChan, err := self.subscribeVisitor(&tapjio.DecodingCallbacks{
 		OnTrace: func(trace tapjio.TraceEvent) (err error) {
 			traceEvents = append(traceEvents, trace)
 			return
@@ -148,10 +168,12 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 			if currentRunner != nil {
 				testRunners = append(testRunners, *currentRunner)
 			}
-			wg.Done()
 			return nil
 		},
 	})
+	if err != nil {
+		return
+	}
 
 	self.request(
 		map[string]string{},
@@ -160,13 +182,39 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 			"--seed", fmt.Sprintf("%v", cfg.RunnerConfig.Seed),
 			"--tapj-sink", serverAddress,
 		})
-	wg.Wait()
 
+	err = <-errChan
 	return
 }
 
-func (self *context) subscribeVisitor(visitor tapjio.Visitor) string {
-	return self.server.Decode(visitor)
+func (self *context) addAddress(address string) {
+	m := self.mutex
+	m.Lock()
+	defer m.Unlock()
+
+	self.addresses = append(self.addresses, address)
+}
+
+func (self *context) subscribeVisitor(visitor tapjio.Visitor) (string, chan error, error) {
+	address, errChan, err := self.srv.Decode(visitor)
+	if err != nil {
+		return "", nil, err
+	}
+
+	self.addAddress(address)
+	return address, errChan, nil
+}
+
+func (self *context) cancelAllVisitorSubscriptions() {
+	m := self.mutex
+	m.Lock()
+	addresses := append([]string{}, self.addresses...)
+	self.addresses = []string{}
+	m.Unlock()
+
+	for _, address := range addresses {
+		self.srv.Cancel(address)
+	}
 }
 
 func (self *context) request(env map[string]string, args []string) {
@@ -189,7 +237,7 @@ func (self rubyRunner) TestCount() int {
 
 // debitFilter returns a new slice, with the given string removed from the given slice. Returns
 // an error if the given string is not present.
-func debitFilter(filters []string, filter string) ([]string, error) {
+func debitFilter(filters []string, filter string, kind string, saw []string) ([]string, error) {
 	for i, f := range filters {
 		if filter == f {
 			return append(filters[:i], filters[i+1:]...), nil
@@ -197,7 +245,7 @@ func debitFilter(filters []string, filter string) ([]string, error) {
 	}
 
 	return filters, errors.New(
-		fmt.Sprintf("Unexpected test filter: %s. Expected one of %v", filter, filters))
+		fmt.Sprintf("Unexpected %s test filter: %s. Expected one of %v. Saw %v", kind, filter, filters, saw))
 }
 
 // Run executes the rubyRunner's tests with the given environment variables. Events triggered
@@ -205,62 +253,54 @@ func debitFilter(filters []string, filter string) ([]string, error) {
 // goes wrong before starting the tests or while processing the a test event.
 // NOTE(adamb) It is not careful about ensuring the test is no longer running in the case of an
 //     error.
-func (self rubyRunner) Run(env map[string]string, callbacks tapjio.DecodingCallbacks) error {
+func (self rubyRunner) Run(env map[string]string, visitor tapjio.Visitor) error {
 	var allowedBeginFilters, allowedFinishFilters []string
 	allowedBeginFilters = append(allowedBeginFilters, self.filters...)
+	sawBeginFilters := []string{}
 	allowedFinishFilters = append(allowedFinishFilters, self.filters...)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	onTestBegin := callbacks.OnTestBegin
-	callbacks.OnTestBegin = func(event tapjio.TestStartedEvent) error {
-		var err error
-		allowedBeginFilters, err = debitFilter(allowedBeginFilters, event.Filter)
-		if err != nil {
-			return err
-		}
+	sawFinishFilters := []string{}
 
-		if onTestBegin == nil {
-			return nil
-		}
-		return onTestBegin(event)
-	}
-	onTest := callbacks.OnTest
-	callbacks.OnTest = func(event tapjio.TestEvent) error {
-		var err error
-		allowedFinishFilters, err = debitFilter(allowedFinishFilters, event.Filter)
-		if err != nil {
-			return err
-		}
+	bothVisitors := tapjio.MultiVisitor(
+		[]tapjio.Visitor{
+			&tapjio.DecodingCallbacks{
+				OnTestBegin: func(event tapjio.TestStartedEvent) error {
+					sawBeginFilters = append(sawBeginFilters, event.Filter)
+					var err error
+					allowedBeginFilters, err = debitFilter(allowedBeginFilters, event.Filter, "begin", sawBeginFilters)
+					return err
+				},
+				OnTest: func(event tapjio.TestEvent) error {
+					sawFinishFilters = append(sawFinishFilters, event.Filter)
+					var err error
+					allowedFinishFilters, err = debitFilter(allowedFinishFilters, event.Filter, "finish", sawFinishFilters)
+					return err
+				},
+				OnEnd: func(reason error) error {
+					if reason != nil {
+						return nil
+					}
 
-		if onTest == nil {
-			return nil
-		}
-		return onTest(event)
-	}
+					if len(allowedFinishFilters) != 0 {
+						return fmt.Errorf("Runner finished without emitting all expected tests. Never saw: %v. Did see: finish %v, begin %v", allowedFinishFilters, sawFinishFilters, sawBeginFilters)
+					}
 
-	onEnd := callbacks.OnEnd
-	callbacks.OnEnd = func(reason error) error {
-		defer wg.Done()
+					return nil
+				},
+			},
+			visitor,
+		})
 
-		if len(allowedFinishFilters) != 0 {
-			errMsg := fmt.Sprintf("Runner finished without emitting all expected tests. Never saw: %v", allowedFinishFilters)
-			return errors.New(errMsg)
-		}
-
-		if onEnd == nil {
-			return nil
-		}
-
-		return onEnd(reason)
+	address, errChan, err := self.ctx.subscribeVisitor(bothVisitors)
+	if err != nil {
+		return err
 	}
 
 	self.ctx.request(
 		env,
 		append([]string{
 			"--seed", fmt.Sprintf("%v", self.ctx.config.RunnerConfig.Seed),
-			"--tapj-sink", self.ctx.subscribeVisitor(&callbacks),
+			"--tapj-sink", address,
 		}, self.filters...))
 
-	wg.Wait()
-	return nil
+	return <-errChan
 }

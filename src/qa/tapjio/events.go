@@ -30,12 +30,12 @@ type BaseEvent struct {
 }
 
 type SuiteEvent struct {
-	Type  string `json:"type"`
-	Start string `json:"start"`
-	Count int    `json:"count"`
-	Seed  int    `json:"seed"`
-	Rev   int    `json:"rev"`
-	Label string `json:"label,omitempty"`
+	Type    string `json:"type"`
+	Start   string `json:"start"`
+	Count   int    `json:"count"`
+	Seed    int    `json:"seed"`
+	Rev     int    `json:"rev"`
+	Label   string `json:"label,omitempty"`
 	Coderef string `json:"coderef,omitempty"`
 }
 
@@ -251,13 +251,24 @@ func MultiVisitor(visitors []Visitor) Visitor {
 			return nil
 		},
 		OnEnd: func(reason error) error {
+			// Treat errors in OnEnd specially, so everyone gets a chance to clean up
+			errors := []error{}
 			for _, visitor := range visitors {
 				err := visitor.End(reason)
 				if err != nil {
-					return err
+					errors = append(errors, err)
 				}
 			}
-			return nil
+
+			if len(errors) == 0 {
+				return nil
+			}
+
+			if len(errors) == 1 {
+				return errors[0]
+			}
+
+			return fmt.Errorf("Multiple errors encountered during tapjio.Visitor.End(%#v): %#v", reason, errors)
 		},
 	}
 }
@@ -347,9 +358,11 @@ func incrementValue(p map[string]int, k string, increment int) {
 	p[k] = n + increment
 }
 
-func Decode(reader io.Reader, visitor Visitor) (err error) {
-	decoder := json.NewDecoder(reader)
+func DecodeReader(reader io.Reader, visitor Visitor) error {
+	return Decode(json.NewDecoder(reader), visitor)
+}
 
+func Decode(decoder *json.Decoder, visitor Visitor) (err error) {
 	var currentSuite *SuiteEvent
 	var currentCases []CaseEvent
 	currentCases = make([]CaseEvent, 0)
@@ -428,6 +441,8 @@ func Decode(reader io.Reader, visitor Visitor) (err error) {
 				fe.MetaStats[eventType+"/count"] = count
 			}
 			err = visitor.SuiteFinished(*fe)
+		default:
+			fmt.Fprintln(os.Stderr, "Unknown event", event)
 		}
 	}
 

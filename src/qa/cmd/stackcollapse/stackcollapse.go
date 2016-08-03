@@ -21,7 +21,7 @@ func decodeStacktrace(path string, def io.ReadCloser, writer io.Writer) error {
 	}
 	defer reader.Close()
 
-	return tapjio.Decode(reader, tapjio.NewStacktraceEmitter(writer))
+	return tapjio.DecodeReader(reader, tapjio.NewStacktraceEmitter(writer))
 }
 
 // Usage:
