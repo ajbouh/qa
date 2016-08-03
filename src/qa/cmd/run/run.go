@@ -72,11 +72,10 @@ func Run(env *Env) (tapjio.FinalEvent, error) {
 		}
 
 		ctx, err := starter(env.Server, env.WorkerEnvs, runnerConfig)
-		defer ctx.Close()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error! %v\n", err)
 			return final, err
 		}
+		defer ctx.Close()
 
 		traceEvents, runners, err := ctx.EnumerateRunners()
 		if err != nil {
