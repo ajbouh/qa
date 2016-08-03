@@ -17,6 +17,8 @@ func runQa(dir string) (*testutil.Transcript, error) {
 	var err error
 	tscript.Stderr, err = testutil.RunQaCmd(run.Main, visitor, dir, []string{
 		"-format=tapj",
+		"-listen-network", "tcp",
+		"-listen-address", "127.0.0.1:0",
 		"rspec",
 		"minitest:test/minitest/**/test*.rb",
 		"test-unit:test/test-unit/**/test*.rb",

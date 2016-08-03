@@ -44,6 +44,8 @@ func TestDetectFlaky(t *testing.T) {
 		"-suite-label", "my-flaky-suite",
 		"-suite-coderef", "r1",
 		"-archive-base-dir", dir,
+		"-listen-network", "tcp",
+		"-listen-address", "127.0.0.1:0",
 		"rspec",
 		"minitest:test/minitest/**/test*.rb",
 		"test-unit:test/test-unit/**/test*.rb",
