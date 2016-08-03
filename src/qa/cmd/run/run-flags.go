@@ -12,9 +12,9 @@ type runFlags struct {
 	outputFlags    *outputFlags
 	executionFlags *executionFlags
 
-	chdir          *string
-	suiteCoderef   *string
-	suiteLabel     *string
+	chdir        *string
+	suiteCoderef *string
+	suiteLabel   *string
 }
 
 func DefineFlags(flags *flag.FlagSet) *runFlags {
