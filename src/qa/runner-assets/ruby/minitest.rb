@@ -46,12 +46,7 @@ class TapJRunner
 
     @stdcom.reset!
 
-    emit(
-        'type'  => 'suite',
-        'start' => ::Qa::Time.strftime(@suite_start_time, '%Y-%m-%d %H:%M:%S'),
-        'count' => @test_count,
-        'seed'  => @options[:seed],
-        'rev'   => REVISION)
+    @io.emit_suite_event(@suite_start_time, @test_count, @options[:seed])
   end
 
   def preview(result)
@@ -70,12 +65,11 @@ class TapJRunner
           'level'   => 0)
     end
 
-    emit(
-        'type' => 'note',
-        'qa:type' => 'test:begin',
-        'qa:timestamp' => @test_start,
-        'qa:label' => @test_label,
-        'qa:filter' => "#{result.class}##{result.name}")
+    @io.emit_test_begin_event(
+        @test_start,
+        'test',
+        @test_label,
+        "#{result.class}##{result.name}")
 
     @previous_case = result.class
 
@@ -129,29 +123,12 @@ class TapJRunner
   # Minitest's finalization hook.
   #
   def report
-    aggregate = @results.group_by { |r| r.failure.class }
-    aggregate.default = [] # dumb. group_by should provide this
-
-    corrected_time = ::Qa::Time.now_f - @suite_start_time
-
     @trace.emit_final_stats
-
-    emit(
-        'type' => 'final',
-        'time' => corrected_time,
-        'counts' => {
-          'total' => @test_count,
-          'pass'  => aggregate[NilClass].size,
-          'fail'  => aggregate[Minitest::Assertion].size,
-          'error' => aggregate[Minitest::UnexpectedError].size,
-          'omit'  => 0, # "omitted" tests are omitted by design
-          # "pending" tests are tests that call skip() which shall be implemented someday.
-          'todo'  => aggregate[Minitest::Skip].size
-        })
+    @io.emit_final_event(::Qa::Time.now_f - @suite_start_time)
   end
 
-  def passed? # :nodoc:
-    @results.all? { |r| r.skipped? || r.passed? }
+  def passed?
+    @io.passed?
   end
 
   private
@@ -172,35 +149,28 @@ class TapJRunner
 end
 
 engine = ::Qa::TestEngine.new
-engine.def_prefork do |files|
-  files.each do |file|
-    load(file)
+
+module ::Qa::MinitestDryRunnerClassMethods
+  def run_one_method(klass, method_name, reporter)
+    test = klass.new(method_name)
+    reporter.preview test
+    reporter.record test
+  end
+end
+
+module ::Qa::MinitestRunnerClassMethods
+  def run_one_method(klass, method_name, reporter)
+    test = klass.new(method_name)
+    reporter.preview test
+    reporter.record test.run
   end
 end
 
 engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   if opt.dry_run
-    Minitest::Runnable.class_eval do
-      class <<self
-        remove_method :run_one_method
-        def run_one_method(klass, method_name, reporter)
-          test = klass.new(method_name)
-          reporter.preview test
-          reporter.record test
-        end
-      end
-    end
+    Minitest::Test.send(:extend, ::Qa::MinitestDryRunnerClassMethods)
   else
-    Minitest::Runnable.class_eval do
-      class <<self
-        remove_method :run_one_method
-        def run_one_method(klass, method_name, reporter)
-          test = klass.new(method_name)
-          reporter.preview test
-          reporter.record test.run
-        end
-      end
-    end
+    Minitest::Test.send(:extend, ::Qa::MinitestRunnerClassMethods)
   end
 
   options = {

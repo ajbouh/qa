@@ -1,86 +1,28 @@
 package qa_test
 
 import (
-	"bytes"
-	"io"
-	"path"
-	"qa/cmd"
 	"qa/cmd/run"
 	"qa/tapjio"
+	"qa_test/testutil"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-type transcript struct {
-	Stderr            string
-	Events            []interface{}
-	SuiteEvents       []tapjio.SuiteEvent
-	TestEvents        []tapjio.TestEvent
-	TestStartedEvents []tapjio.TestStartedEvent
-	TraceEvents       []tapjio.TraceEvent
-	FinalEvents       []tapjio.FinalEvent
-}
-
 // TODO which ruby version must qa want to run?
-func runQa(t *testing.T, dir string) (tscript transcript, err error) {
-	tscript.Events = make([]interface{}, 0)
+func runQa(dir string) (*testutil.Transcript, error) {
+	tscript, visitor := testutil.NewTranscriptBuilder()
 
-	var stderrBuf bytes.Buffer
+	var err error
+	tscript.Stderr, err = testutil.RunQaCmd(run.Main, visitor, dir, []string{
+		"-format=tapj",
+		"rspec",
+		"minitest:test/minitest/**/test*.rb",
+		"test-unit:test/test-unit/**/test*.rb",
+	})
 
-	rd, wr := io.Pipe()
-	defer rd.Close()
-	defer wr.Close()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- run.Main(
-			&cmd.Env{Stdout: wr, Stderr: &stderrBuf, Dir: dir},
-			[]string{
-				"-format=tapj",
-				"rspec",
-				"minitest:test/minitest/**/test*.rb",
-				"test-unit:test/test-unit/**/test*.rb",
-			})
-
-		wr.Close()
-	}()
-
-	err = tapjio.Decode(rd,
-		&tapjio.DecodingCallbacks{
-			OnSuite: func(event tapjio.SuiteEvent) error {
-				tscript.Events = append(tscript.Events, event)
-				tscript.SuiteEvents = append(tscript.SuiteEvents, event)
-				return nil
-			},
-			OnTestBegin: func(event tapjio.TestStartedEvent) error {
-				tscript.Events = append(tscript.Events, event)
-				tscript.TestStartedEvents = append(tscript.TestStartedEvents, event)
-				return nil
-			},
-			OnTest: func(event tapjio.TestEvent) error {
-				tscript.Events = append(tscript.Events, event)
-				tscript.TestEvents = append(tscript.TestEvents, event)
-				return nil
-			},
-			OnTrace: func(event tapjio.TraceEvent) error {
-				tscript.Events = append(tscript.Events, event)
-				tscript.TraceEvents = append(tscript.TraceEvents, event)
-				return nil
-			},
-			OnFinal: func(event tapjio.FinalEvent) error {
-				tscript.Events = append(tscript.Events, event)
-				tscript.FinalEvents = append(tscript.FinalEvents, event)
-				return nil
-			},
-		})
-
-	if err == nil {
-		err = <-errCh
-	}
-
-	tscript.Stderr = stderrBuf.String()
-	return
+	return tscript, err
 }
 
 func findTestEvent(events []tapjio.TestEvent, label string) tapjio.TestEvent {
@@ -93,18 +35,35 @@ func findTestEvent(events []tapjio.TestEvent, label string) tapjio.TestEvent {
 	return tapjio.TestEvent{}
 }
 
-func TestRuby(t *testing.T) {
-	baseDir := "fixtures/ruby"
+func TestRun(t *testing.T) {
+	var tscript *testutil.Transcript
 	var err error
-	var tscript transcript
 
-	tscript, err = runQa(t, path.Join(baseDir, "simple"))
-	if err != nil {
-		t.Fatal("qa failed here.", err, tscript.Stderr)
+	startingTime := time.Now()
+	tscript, err = runQa("fixtures/ruby/simple")
+	finalTime := time.Now()
+	require.NoError(t, err, "qa failed: %s", tscript.Stderr)
+
+	// Expect suite event to have time ≥ when we started qa
+	suiteEvent := tscript.SuiteEvents[0]
+	suiteStartTime, err := time.Parse("2006-01-02 15:04:05", suiteEvent.Start)
+	require.NoError(t, err, "Invalid suite start time: %s", suiteEvent.Start)
+
+	duration := finalTime.Sub(startingTime)
+	require.InDelta(t, startingTime.UnixNano(), suiteStartTime.UnixNano(), duration.Seconds() * 1e9,
+			"Suite time (%v) too far from current time (%v)", suiteStartTime, startingTime)
+
+	// Expect 6 test events, all should have a time ≥ when we started qa
+	require.Equal(t, 6, len(tscript.TestStartedEvents), "Wrong number of test begin events.")
+	for _, testEvent := range tscript.TestStartedEvents {
+		require.Equal(t, true, testEvent.Timestamp >= float64(startingTime.Unix()),
+				"Test timestamp (%v) should be on or after initial time (%v).", testEvent.Timestamp, startingTime)
 	}
 
-	if len(tscript.Events) == 0 {
-		t.Fatal("No events for tests in", baseDir, tscript.Stderr)
+	require.Equal(t, 6, len(tscript.TestEvents), "Wrong number of test events.")
+	for _, testEvent := range tscript.TestEvents {
+		require.Equal(t, true, testEvent.Time <= duration.Seconds(),
+				"Test duration (%v) should be less than or equal to the total duration (%v).", testEvent.Time, duration)
 	}
 
 	testEventLabelsExpectingStandardFds := []string{
@@ -118,40 +77,16 @@ func TestRuby(t *testing.T) {
 		require.Contains(t, testEvent.Stderr, "Created MyLibrary [err]")
 	}
 
-	finalEvent := tscript.Events[len(tscript.Events)-1]
-	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
-		expect := tapjio.ResultTally{Total: 6, Pass: 6}
+	require.Equal(t,
+		tapjio.ResultTally{Total: 6, Pass: 6},
+		*tscript.FinalEvents[0].Counts,
+		"wrong count in final event. Events: %#v, Stderr: %v\n", tscript.Events, tscript.Stderr)
 
-		if expect != *fe.Counts {
-			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, tscript.Events, tscript.Stderr)
-		}
-	} else {
-		t.Fatal("last event wasn't a final event.", tscript.Events, tscript.Stderr)
-	}
+	tscript, err = runQa("fixtures/ruby/all-outcomes")
+	require.Error(t, err, "qa should have failed: %s", tscript.Stderr)
 
-	tscript, err = runQa(t, path.Join(baseDir, "all-outcomes"))
-	if err == nil {
-		t.Fatal("qa should have failed.", tscript.Stderr)
-	}
-
-	if len(tscript.Events) == 0 {
-		t.Fatal("No events for tests in", baseDir, tscript.Stderr)
-	}
-
-	finalEvent = tscript.Events[len(tscript.Events)-1]
-	if fe, ok := finalEvent.(tapjio.FinalEvent); ok {
-		expect := tapjio.ResultTally{
-			Total: 16,
-			Pass:  4,
-			Fail:  4,
-			Todo:  4,
-			Error: 4,
-		}
-
-		if expect != *fe.Counts {
-			t.Fatal("wrong count in final event.", expect, "vs", *fe.Counts, tscript.Events, tscript.Stderr)
-		}
-	} else {
-		t.Fatal("last event wasn't a final event.", tscript.Events, tscript.Stderr)
-	}
+	require.Equal(t,
+		tapjio.ResultTally{Total: 20, Pass: 4, Fail: 4, Todo: 4, Error: 8},
+		*tscript.FinalEvents[0].Counts,
+		"wrong count in final event. Events: %#v, Stderr: %v\n", tscript.Events, tscript.Stderr)
 }

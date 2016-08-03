@@ -21,9 +21,6 @@ module RSpec
         :message,
         :close
 
-    # TAP-Y/J Revision
-    REVISION = 4
-
     attr_accessor :example_group_stack
     attr_reader :summary
 
@@ -51,14 +48,7 @@ module RSpec
       super(notification)
 
       now = ::Qa::Time.now_f
-
-      emit({
-            'type'  => 'suite',
-            'start' => ::Qa::Time.strftime(now, '%Y-%m-%d %H:%M:%S'),
-            'count' => notification.count,
-            'seed'  => @seed,
-            'rev'   => REVISION
-          })
+      output.emit_suite_event(now, notification.count, @seed)
     end
 
     #
@@ -76,7 +66,7 @@ module RSpec
         'label'   => "#{notification.group.description}",
         'level'   => @example_group_stack.size
       }
-      emit(doc)
+      output.emit(doc)
       @trace.emit_begin('rspec describe', 'args' => doc)
 
       @example_count_stack << @example_count
@@ -99,16 +89,79 @@ module RSpec
       @trace.emit_begin('rspec it', 'ts' => @start_time * 1e6)
 
       example = notification.example
-      emit(
-          'type' => 'note',
-          'qa:type' => 'test:begin',
-          'qa:timestamp' => @start_time,
-          'qa:label' => "#{example.description}",
-          'qa:subtype' => 'it',
-          'qa:filter' => example.object_id.to_s)
+      output.emit_test_begin_event(
+          @start_time,
+          example.description,
+          'it',
+          example.object_id.to_s)
 
       @stdcom.reset!
     end
+
+    #
+    def example_passed(notification)
+      @example_count += 1
+      @trace.emit_stats
+      output.emit(example_base(notification, 'pass'))
+      output.flush
+    end
+
+    #
+    def example_pending(notification)
+      @example_count += 1
+      @trace.emit_stats
+      output.emit(example_base(notification, 'todo'))
+      output.flush
+    end
+
+    #
+    def example_failed(notification)
+      @example_count += 1
+      example = notification.example
+      exception = example.exception
+      doc = example_base(
+          notification,
+          RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error')
+
+      if doc['status'] == 'fail'
+        if md = /expected:\s*(.*?)\n\s*got:\s*(.*?)\s+/.match(exception.to_s)
+          expected, returned = md[1], md[2]
+          doc.update(
+              'expected' => expected,
+              'returned' => returned)
+        end
+      end
+
+      doc.update(
+          'exception' => ::Qa::TapjExceptions.summarize_exception(
+              exception,
+              RSpec.configuration.backtrace_formatter.format_backtrace(
+                  exception.backtrace, example.metadata)))
+
+      output.emit(doc)
+      output.flush
+    end
+
+    # This method is invoked after the dumping of examples and failures.
+    def dump_summary(summary_notification)
+      @trace.emit_final_stats
+      output.emit_final_event(summary_notification.duration)
+    end
+
+    def seed(notification)
+      @seed = notification.seed
+    end
+
+    # Add any messages as notes.
+    def message(message_notification)
+      output.emit('type' => 'note', 'text' => message_notification.message)
+    end
+
+    def passed?
+      output.passed?
+    end
+
+  private
 
     def example_base(notification, status)
       example = notification.example
@@ -139,106 +192,6 @@ module RSpec
     end
 
     #
-    def example_passed(notification)
-      @example_count += 1
-      emit example_base(notification, 'pass')
-    end
-
-    #
-    def example_pending(notification)
-      @example_count += 1
-      emit example_base(notification, 'todo')
-    end
-
-    #
-    def example_failed(notification)
-      @example_count += 1
-      example = notification.example
-      exception = example.exception
-      doc = example_base(
-          notification,
-          RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error')
-
-      if doc['status'] == 'fail'
-        if md = /expected:\s*(.*?)\n\s*got:\s*(.*?)\s+/.match(exception.to_s)
-          expected, returned = md[1], md[2]
-          doc.update(
-              'expected' => expected,
-              'returned' => returned)
-        end
-      end
-
-      doc.update(
-          'exception' => ::Qa::TapjExceptions.summarize_exception(
-              exception,
-              format_backtrace(exception.backtrace, example.metadata)))
-
-      emit doc
-    end
-
-    # This method is invoked after the dumping of examples and failures.
-    def dump_summary(summary_notification)
-      duration      = summary_notification.duration
-      example_count = summary_notification.examples.size
-      failure_count = summary_notification.failed_examples.size
-      pending_count = summary_notification.pending_examples.size
-
-      failed_examples = summary_notification.failed_examples
-
-      error_count = 0
-
-      failed_examples.each do |e|
-        if RSpec::Expectations::ExpectationNotMetError === e.exception
-          #failure_count += 1
-        else
-          failure_count -= 1
-          error_count += 1
-        end
-      end
-
-      passing_count = example_count - failure_count - error_count - pending_count
-
-      @summary = {
-        'type' => 'final',
-        'time' => duration,
-        'counts' => {
-          'total' => example_count,
-          'pass'  => passing_count,
-          'fail'  => failure_count,
-          'error' => error_count,
-          'omit'  => 0,
-          'todo'  => pending_count
-        }
-      }
-
-      @trace.emit_final_stats
-
-      emit @summary
-    end
-
-    def seed(notification)
-      @seed = notification.seed
-    end
-
-    # Add any messages as notes.
-    def message(message_notification)
-      emit('type' => 'note', 'text' => message_notification.message)
-    end
-
-    def passed?
-      counts = @summary['counts']
-      (counts['fail'] + counts['error']).zero?
-    end
-
-  private
-
-    def emit(doc)
-      @trace.emit_stats
-      output.emit(doc)
-      output.flush
-    end
-
-    #
     def relative_path_regex
       @relative_path_regex ||= /(\A|\s)#{File.expand_path('.')}(#{File::SEPARATOR}|\s|\Z)/
     end
@@ -256,25 +209,13 @@ module RSpec
     rescue SecurityError
       nil
     end
-
-    #
-    def format_backtrace(*args)
-      backtrace_formatter.format_backtrace(*args)
-    end
-
-    #
-    def backtrace_formatter
-      RSpec.configuration.backtrace_formatter
-    end
   end
 end
 
 engine = ::Qa::TestEngine.new
 groups = nil
-engine.def_prefork do |files|
-  files.each { |file| load file }
-
-  # Trigger eager loading. Should do this automatically...
+engine.def_prefork do
+  # Trigger eager loading.
   ::Qa::Warmup::Autoload.load_constants_recursively(RSpec)
 
   groups = RSpec.world.ordered_example_groups.dup
@@ -293,6 +234,10 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   world = ::RSpec.world
   rspec_config = RSpec.configuration
 
+  unless tests.empty?
+    world.filter_manager.include(:object_id => lambda { |v| tests.include?(v) })
+  end
+
   formatter = ::RSpec::TapjFormatter.new(qa_trace, tapj_conduit)
   # create reporter with json formatter
   reporter = RSpec::Core::Reporter.new(rspec_config)
@@ -304,10 +249,6 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
 
   if opt.dry_run
     rspec_config.dry_run = true
-  end
-
-  unless tests.empty?
-    world.filter_manager.include(:object_id => lambda { |v| tests.include?(v) })
   end
 
   reporter.report(world.example_count(groups)) do |reporter|

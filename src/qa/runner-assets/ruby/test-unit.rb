@@ -20,7 +20,6 @@ module Test::Unit::UI::Tap
       @level = 0
       @already_outputted = false
       @top_level = true
-      @counts = Hash.new{ |h,k| h[k] = 0 }
       @stdcom = ::Qa::Stdcom.new
     end
 
@@ -37,29 +36,12 @@ module Test::Unit::UI::Tap
 
     def tapout_before_suite(result)
       @result = result
-
-      emit(
-          'type'  => 'suite',
-          'start' => ::Qa::Time.strftime(::Qa::Time.now_f, '%Y-%m-%d %H:%M:%S'),
-          'count' => @suite.size,
-          'seed'  => @seed,
-          'rev'   => REVISION)
+      @output.emit_suite_event(::Qa::Time.now_f, @suite.size, @seed)
     end
 
     def tapout_after_suite(elapsed_time)
       @trace.emit_final_stats
-
-      emit(
-          'type' => 'final',
-          'time' => elapsed_time,
-          'counts' => {
-            'total' => @counts[:total],
-            'pass'  => @counts[:pass],
-            'fail'  => @counts[:fail],
-            'error' => @counts[:error],
-            'omit'  => @counts[:omit],
-            'todo'  => @counts[:todo],
-          })
+      @output.emit_final_event(elapsed_time)
     end
 
     def tapout_before_case(testcase)
@@ -91,12 +73,11 @@ module Test::Unit::UI::Tap
       @test = test
       @already_outputted = false
 
-      emit(
-          'type' => 'note',
-          'qa:type' => 'test:begin',
-          'qa:timestamp' => @test_start,
-          'qa:label' => clean_label(test.name),
-          'qa:filter' => "#{@test.class.name}##{test.method_name}")
+      @output.emit_test_begin_event(
+          @test_start,
+          'test',
+          clean_label(test.name),
+          "#{@test.class.name}##{test.method_name}")
 
       # set up stdout and stderr to be captured
       @stdcom.reset!
@@ -104,8 +85,6 @@ module Test::Unit::UI::Tap
 
     #
     def tapout_fault(fault)
-      @counts[:total] += 1
-
       doc = {
         'type'        => 'test',
         'label'       => clean_label(fault.test_name),
@@ -115,15 +94,11 @@ module Test::Unit::UI::Tap
       }
       case fault
       when Test::Unit::Pending
-        @counts[:todo]  += 1
-
         doc.merge!(
             'status'      => 'todo',
             'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location))
 
       when Test::Unit::Omission
-        @counts[:todo]  += 1
-
         doc.merge!(
             'status'      => 'todo',
             'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location))
@@ -131,16 +106,12 @@ module Test::Unit::UI::Tap
         doc.merge!(
             'text' => note.message)
       when Test::Unit::Failure
-        @counts[:fail]  += 1
-
         doc.merge!(
             'status'      => 'fail',
             'expected'    => fault.inspected_expected,
             'returned'    => fault.inspected_actual,
             'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location, fault.user_message))
       else
-        @counts[:error] += 1
-
         doc.merge!(
             'status'      => 'error',
             'exception'   => ::Qa::TapjExceptions.summarize_exception(fault.exception, fault.location))
@@ -158,9 +129,6 @@ module Test::Unit::UI::Tap
       if @already_outputted
         return nil
       end
-
-      @counts[:total] += 1
-      @counts[:pass]  += 1
 
       doc = {
         'type'        => 'test',
@@ -190,13 +158,9 @@ end
 
 
 engine = ::Qa::TestEngine.new
-engine.def_prefork do |files|
+engine.def_prefork do
   Test::Unit::AutoRunner.register_runner(:tapj) do |auto_runner|
     Test::Unit::UI::Tap::TapjTestRunner
-  end
-
-  files.each do |file|
-    load(file)
   end
 end
 

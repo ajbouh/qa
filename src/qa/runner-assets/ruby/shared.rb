@@ -155,15 +155,24 @@ module Qa::Time
   module_function
   if defined? Process::CLOCK_MONOTONIC
     def strftime(time_f, format)
-      PrivateTime.at(time_f).strftime(format)
+      time = PrivateTime.now + (time_f - now_f)
+      time.strftime(format)
     end
 
     def now_f
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
+
+    def at_f(time_f)
+      PrivateTime.now.to_f + (time_f - now_f)
+    end
   else
     def strftime(time_f, format)
       PrivateTime.at(time_f).strftime(format)
+    end
+
+    def at_f(time_f)
+      time_f
     end
 
     def now_f
@@ -754,6 +763,21 @@ module Qa::TapjExceptions
     backtrace_bindings = error.instance_variable_get(:@__qa_caller_bindings)
     load_path = $LOAD_PATH.map(&:to_s)
 
+    unless message
+      if error.is_a?(SyntaxError)
+        if error.message =~ /\A([^:]+:\d+):\s+(.*)$/
+          message = $2
+          backtrace = [$1, *backtrace]
+          backtrace_bindings = [nil, *backtrace_bindings]
+        end
+      elsif error.is_a?(LoadError)
+        backtrace = backtrace[1..-1]
+        backtrace_bindings = backtrace_bindings[1..-1] if backtrace_bindings
+      end
+
+      message ||= error.message
+    end
+
     backtrace = backtrace.each_with_index.map do |entry, index|
       entry =~ /(.+?):(\d+)(?:\:in `(.*)')?/ || (next nil)
 
@@ -791,7 +815,7 @@ module Qa::TapjExceptions
     end
 
     {
-      'message'   => (message || error.message).strip,
+      'message'   => message.strip,
       'class'     => error.class.name,
       'snippets'  => snippets,
       'backtrace' => backtrace,
@@ -839,16 +863,16 @@ module Qa::TapjExceptions
   end
 end
 
-class ::Qa::TapjConduit
+class ::Qa::JsonConduit
   def initialize(io)
     @io = io
     @mutex = Mutex.new
     @buffer = []
   end
 
-  def emit(doc)
+  def emit(event)
     @mutex.synchronize do
-      @buffer.push(doc)
+      @buffer.push(event)
     end
   end
 
@@ -865,6 +889,123 @@ class ::Qa::TapjConduit
   end
 end
 
+class ::Qa::TapjConduit
+  # TAP-Y/J Revision
+  REVISION = 4
+
+  def initialize(upstream)
+    @upstream = upstream
+    @mutex = Mutex.new
+
+    @preloaded_test_events = []
+    @total_count = 0
+    @fail_count = 0
+    @error_count = 0
+    @pass_count = 0
+    @omit_count = 0
+    @todo_count = 0
+  end
+
+  def emit_test_begin_event(start_time, label, subtype, filter)
+    emit(
+        'type' => 'note',
+        'qa:type' => 'test:begin',
+        'qa:timestamp' => ::Qa::Time.at_f(start_time),
+        'qa:label' => label,
+        'qa:subtype' => subtype,
+        'qa:filter' => filter)
+    flush
+  end
+
+  def preloaded_test_events=(events)
+    @mutex.synchronize do
+      @preloaded_test_events = events.dup
+    end
+  end
+
+  def emit_suite_event(now, count, seed)
+    preloaded_test_events = @mutex.synchronize do
+      p = @preloaded_test_events.dup
+      @preloaded_test_events.clear
+      p
+    end
+
+    emit(
+        'type'  => 'suite',
+        'start' => ::Qa::Time.strftime(now, '%Y-%m-%d %H:%M:%S'),
+        'count' => count + preloaded_test_events.length,
+        'seed'  => seed,
+        'rev'   => REVISION)
+
+    preloaded_test_events.each do |event|
+      emit_test_begin_event(
+          now,
+          event['label'],
+          event['subtype'],
+          event['filter'])
+
+      emit(event)
+    end
+
+    flush
+  end
+
+  # This method is invoked after the dumping of examples and failures.
+  def emit_final_event(duration)
+    event = @mutex.synchronize do
+      {
+        'type' => 'final',
+        'time' => duration,
+        'counts' => {
+          'total' => @total_count,
+          'pass'  => @pass_count,
+          'fail'  => @fail_count,
+          'error' => @error_count,
+          'omit'  => @omit_count,
+          'todo'  => @todo_count
+        }
+      }
+    end
+
+    emit(event)
+    flush
+  end
+
+  def passed?
+    @mutex.synchronize do
+      (@fail_count + @error_count).zero?
+    end
+  end
+
+  def emit(event)
+    @mutex.synchronize do
+      case event['type']
+      when 'test'
+        @total_count += 1
+
+        case event['status']
+        when 'fail'
+          @fail_count += 1
+        when 'error'
+          @error_count += 1
+        when 'pass'
+          @pass_count += 1
+        when 'omit'
+          @omit_count += 1
+        when 'todo'
+          @todo_count += 1
+        end
+      end
+    end
+
+    @upstream.emit(event)
+  end
+
+  def flush
+    @upstream.flush
+  end
+end
+
 module ::Qa::ClientSocket
   module_function
 
@@ -873,13 +1014,13 @@ module ::Qa::ClientSocket
     if /^(.*)@([^:]+):(\d+)$/ =~ address
       token, ip, port = $1, $2, $3
       socket = TCPSocket.new(ip, port)
-      socket.puts token
+      socket.write("#{token}\n")
       socket.flush
       socket
     elsif /^(.*)@([^:]+)$/ =~ address
       token, unix = $1, $2, $3
       socket = UNIXSocket.new(unix)
-      socket.puts token
+      socket.write("#{token}\n")
       socket.flush
       socket
     else
@@ -1187,9 +1328,12 @@ class ::Qa::ClientOptionParser
 end
 
 class ::Qa::TestEngine
+  attr_reader :script_errors
+
   def initialize
     @prefork = lambda {}
     @run_tests = lambda {}
+    @script_errors = []
   end
 
   def def_prefork(&b)
@@ -1198,6 +1342,12 @@ class ::Qa::TestEngine
 
   def def_run_tests(&b)
     @run_tests = b
+  end
+
+  def load_file(file)
+    load(file)
+  rescue ScriptError
+    @script_errors.push($!)
   end
 
   def main(args)
@@ -1229,7 +1379,10 @@ class ::Qa::TestEngine
     eval(eval_before_fork) unless eval_before_fork.empty?
 
     # Delegate prefork actions.
-    @prefork.call(initial_files || [])
+    (initial_files || []).each do |file|
+      load_file(file)
+    end
+    @prefork.call
 
     conserved = ::Qa::ConservedInstancesSet.new
 
@@ -1304,39 +1457,76 @@ class ::Qa::TestEngine
 
   def accept_client(cache, env, args, eval_after_fork, resume, conserved, trace_probes, trace_events)
     p = Process.fork do
-      opt = ::Qa::ClientOptionParser.new
-      tests = opt.parse(args)
+      begin
+        opt = ::Qa::ClientOptionParser.new
+        tests = opt.parse(args)
 
-      seed = opt.seed
-      tapj_conduit = ::Qa::TapjConduit.new(::Qa::ClientSocket.connect(opt.tapj_sink))
+        seed = opt.seed
+        socket = ::Qa::ClientSocket.connect(opt.tapj_sink)
+        tapj_conduit = ::Qa::TapjConduit.new(::Qa::JsonConduit.new(socket))
 
-      trace_events.each do |e|
-        tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
-      end
+        run_everything = tests.empty?
 
-      qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
-        tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
-      end
-      trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
-      qa_trace.start
-
-      env.each do |k, v|
-        ENV[k] = v
-      end
-
-      unless opt.dry_run
-        if resume
-          ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
+        script_errors = nil
+        if tests.empty?
+          script_errors = @script_errors.dup
+        else
+          script_errors = @script_errors.select { |v| tests.delete(v.object_id.to_s) }
         end
 
-        eval(eval_after_fork) unless eval_after_fork.empty?
+        unless script_errors.empty?
+          tapj_conduit.preloaded_test_events = script_errors.map do |script_error|
+            exception = ::Qa::TapjExceptions.summarize_exception(
+                script_error,
+                script_error.backtrace)
+            {
+              'type'      => 'test',
+              'subtype'   => 'script',
+              'status'    => 'error',
+              'filter'    => script_error.object_id.to_s,
+              'label'     => exception['backtrace'][0]['file'],
+              'file'      => exception['backtrace'][0]['file'],
+              'line'      => exception['backtrace'][0]['line'],
+              'time'      => 0,
+              'exception' => exception
+            }
+          end
+        end
+
+        trace_events.each do |e|
+          tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
+        end
+
+        qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
+          tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
+        end
+        trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }
+        qa_trace.start
+
+        env.each do |k, v|
+          ENV[k] = v
+        end
+
+        unless opt.dry_run
+          if resume
+            ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
+          end
+
+          eval(eval_after_fork) unless eval_after_fork.empty?
+        end
+
+        if tests.empty? && !run_everything
+          tapj_conduit.emit_suite_event(::Qa::Time.now_f, 0, seed)
+          tapj_conduit.emit_final_event(0)
+        else
+          @run_tests.call(qa_trace, opt, tapj_conduit, tests)
+        end
+
+        conserved.check_conservation
+      ensure
+        tapj_conduit.flush if tapj_conduit
+        socket.close if socket
       end
-
-      @run_tests.call(qa_trace, opt, tapj_conduit, tests)
-
-      conserved.check_conservation
-
-      tapj_conduit.flush
       exit!
     end
     Process.detach(p)
