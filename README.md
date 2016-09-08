@@ -2,7 +2,7 @@
 
 QA is a lightweight tool for running your tests *fast*.
 
-[![qa minitest asciicast](https://asciinema.org/a/d94fig03bbkmnzdy4mtk87ns4.png)](https://asciinema.org/a/d94fig03bbkmnzdy4mtk87ns4)
+[![qa minitest asciicast](https://asciinema.org/a/d9yhz9tdvaws2r3zzv16bjv3i.png)](https://asciinema.org/a/d9yhz9tdvaws2r3zzv16bjv3i)
 
 Advances in type systems, compiler technology, and prototyping environments (to name a few) have helped make many software engineering activities more productive. QA is an effort to make similar strides for automated testing tools.
 

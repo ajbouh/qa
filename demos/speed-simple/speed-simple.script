@@ -23,6 +23,12 @@ git diff -U2; git add --update
 time bundle exec sh -c 'rake test >/dev/null 2>&1'
 
 #
+# Install qa by adding it to the Gemfile
+echo "gem 'qa-tool'" >> Gemfile; git add --update
+
+bundle install --path bundle --quiet
+
+#
 # Now use qa to run the same tests, in parallel.
 time bundle exec qa minitest -quiet
 

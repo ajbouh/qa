@@ -51,7 +51,10 @@
       },
       "commands": [
         "./build-gem"
-      ]
+      ],
+      "prepend-platform-env": {
+        "GEM_CACHE_PATH": ["."]
+      }
     }
   }
 }
