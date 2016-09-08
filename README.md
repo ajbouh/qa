@@ -47,7 +47,7 @@ bundle exec qa rspec
 
 ## Getting started with QA
 
-Starting with the 0.17 release, QA is now available as the 'qa-tool' rubygem. You can add 'qa-tool' to your gem's development dependencies, or add the following to your Gemfile:
+Starting with the 0.17 release, QA is now available as the [qa-tool gem](https://rubygems.org/gems/qa-tool). You can add 'qa-tool' to your gem's development dependencies, or add the following to your Gemfile:
 ```
 gem 'qa-tool'
 ```
