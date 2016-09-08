@@ -8,10 +8,10 @@ import (
 // TimeCop detects which tests are "holding back" a particular TAP-J stream.
 // It does this by identifying tests are dramatically longer than the average.
 type TimeCop struct {
-	outcomes               []outcome
-	passingOutcomes        []outcome
-	FastPassingOutcomes    []outcome
-	SlowPassingOutcomes    []outcome
+	outcomes               []Outcome
+	passingOutcomes        []Outcome
+	FastPassingOutcomes    []Outcome
+	SlowPassingOutcomes    []Outcome
 	averagePassingDuration float64
 	totalPassingDuration   float64
 
@@ -19,25 +19,25 @@ type TimeCop struct {
 	TotalSlowPassingDuration   float64
 	ThresholdDuration          float64
 	SlowestFastPassingDuration float64
-	negativeOutcomes           []outcome
+	negativeOutcomes           []Outcome
 
 	MaxResults int
 }
 
-type ByOutcomeDuration []outcome
+type ByOutcomeDuration []Outcome
 
 func (a ByOutcomeDuration) Len() int           { return len(a) }
 func (a ByOutcomeDuration) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByOutcomeDuration) Less(i, j int) bool { return a[i].Duration < a[j].Duration }
 
-type outcome struct {
+type Outcome struct {
 	result   tapjio.Status
 	Duration float64
 	Label    string
 }
 
-func (self *TimeCop) TestFinished(test tapjio.TestEvent) {
-	o := outcome{
+func (self *TimeCop) TestFinish(test tapjio.TestFinishEvent) {
+	o := Outcome{
 		Duration: test.Time,
 		Label:    tapjio.TestLabel(test.Label, test.Cases),
 		result:   test.Status,
@@ -54,7 +54,7 @@ func (self *TimeCop) TestFinished(test tapjio.TestEvent) {
 	}
 }
 
-func (self *TimeCop) SuiteFinished(final tapjio.FinalEvent) {
+func (self *TimeCop) SuiteFinish(final tapjio.SuiteFinishEvent) {
 	// Assuming we have any, compute average and threshold durations.
 	if len(self.passingOutcomes) > 0 {
 		self.averagePassingDuration = self.totalPassingDuration / float64(len(self.passingOutcomes))

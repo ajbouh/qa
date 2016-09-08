@@ -101,7 +101,7 @@ class Collector
     pruned = {}
     if exception = event["exception"]
       pruned["class"] = exception["class"]
-      snippets = event["snippets"]
+      snippets = exception["snippets"]
       if backtrace = exception["backtrace"]
         include_source = false
         pruned["frames"] = backtrace.map do |frame|
@@ -110,8 +110,9 @@ class Collector
           line = frame["line"]
           h["file"] = file if file
           h["method"] = frame["method"] if frame["method"]
+          h["block_level"] = frame["block_level"] if frame["block_level"]
           if snippets && file && line
-            line_source = snippets[file][line]
+            line_source = snippets[file][line.to_s]
             h["line-source"] = line_source if line_source
           end
 
@@ -123,6 +124,7 @@ class Collector
     end
 
     digest = Digest::SHA1.hexdigest(JSON.generate(pruned))
+    # digest = JSON.generate(pruned)
 
     return "#{status}:#{digest}"
   end
@@ -175,7 +177,7 @@ end
 start = Time.now
 qualifier = Qualifier.new(days_in_window, until_date, audit_directory)
 tapj_file_list = qualifier.tapj_file_list
-$stderr.puts("#{Time.now - start}s to find #{tapj_file_list.length} files")
+$stderr.puts("Found #{tapj_file_list.length} files in #{Time.now - start} seconds.")
 
 # Let the user know we're parsing
 start = Time.now
@@ -184,13 +186,15 @@ parser = Collector.new(tapj_file_list)
 begin
   file = output_file && File.open(output_file, 'w')
   out = file || $stdout
+  event_count = 0
   parser.parse_tapj_output do |test|
     out.puts(JSON.generate(test))
     out.flush
-    $stderr.write(".")
+    event_count += 1
+    # $stderr.write(".")
   end
 
-  $stderr.puts("\n#{Time.now - start}s to parse #{tapj_file_list.length} files")
+  $stderr.puts("Parsed #{event_count} events from #{tapj_file_list.length} files in #{Time.now - start} seconds.")
 ensure
   file.close if file
 end

@@ -18,7 +18,7 @@
       "commands": [
         "env GOPATH=$PWD GOGENPATH=$GIMME_SCRATCH/src go generate -v -x qa/main qa/runner qa/tapjio qa/analysis",
         "env GOPATH=$PWD:$GIMME_SCRATCH go build -o $GIMME_OUTPUT/bin/qa qa/main",
-        "env GOPATH=$PWD:$GIMME_SCRATCH go test -v -race qa_test",
+        "env GOPATH=$PWD:$GIMME_SCRATCH go test -v -race $(env GOPATH=$PWD go list ./... | grep -v /vendor/)",
         "true"
       ],
       "prepend-platform-env": {

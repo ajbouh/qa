@@ -5,8 +5,19 @@ require 'thread'
 require 'rspec/core'
 require 'rspec/core/formatters/base_formatter'
 
-module RSpec
-  class TapjFormatter < Core::Formatters::BaseFormatter
+module ::Qa::Rspec
+  def self.filter_for_example(example, ix)
+    descriptions = [ix]
+    ::RSpec::Core::Metadata.ascending(example.metadata) do |meta|
+      descriptions.push([meta[:description], meta[:location]])
+    end
+
+    descriptions_json = JSON.generate(descriptions)
+
+    return "#{example.metadata[:location]}:#{Digest::SHA2.hexdigest(descriptions_json)[0...8]}"
+  end
+
+  class TapjFormatter < ::RSpec::Core::Formatters::BaseFormatter
 
     ::RSpec::Core::Formatters.register self,
         :start,
@@ -89,11 +100,13 @@ module RSpec
       @trace.emit_begin('rspec it', 'ts' => @start_time * 1e6)
 
       example = notification.example
+
       output.emit_test_begin_event(
           @start_time,
           example.description,
           'it',
-          example.object_id.to_s)
+          example.metadata[:qa_filter],
+          relative_path(example.location.split(':')[0]))
 
       @stdcom.reset!
     end
@@ -121,7 +134,7 @@ module RSpec
       exception = example.exception
       doc = example_base(
           notification,
-          RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error')
+          ::RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error')
 
       if doc['status'] == 'fail'
         if md = /expected:\s*(.*?)\n\s*got:\s*(.*?)\s+/.match(exception.to_s)
@@ -176,7 +189,7 @@ module RSpec
         'type'     => 'test',
         'subtype'  => 'it',
         'status'   => status,
-        'filter'   => example.object_id.to_s,
+        'filter'   => example.metadata[:qa_filter],
         'label'    => "#{example.description}",
         'file'     => file,
         'line'     => line,
@@ -216,13 +229,13 @@ engine = ::Qa::TestEngine.new
 groups = nil
 engine.def_prefork do
   # Trigger eager loading.
-  ::Qa::Warmup::Autoload.load_constants_recursively(RSpec)
+  ::Qa::EagerLoad::Autoload.load_constants_recursively(RSpec)
 
   groups = RSpec.world.ordered_example_groups.dup
   groups.each do |group|
     group.descendants.each do |g|
-      g.examples.each do |example|
-        example.metadata[:object_id] = example.object_id.to_s
+      g.examples.each_with_index do |example, ix|
+        example.metadata[:qa_filter] = ::Qa::Rspec.filter_for_example(example, ix)
       end
     end
   end
@@ -235,16 +248,16 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   rspec_config = RSpec.configuration
 
   unless tests.empty?
-    world.filter_manager.include(:object_id => lambda { |v| tests.include?(v) })
+    world.filter_manager.include(:qa_filter => lambda { |v| tests.include?(v) })
   end
 
-  formatter = ::RSpec::TapjFormatter.new(qa_trace, tapj_conduit)
+  formatter = ::Qa::Rspec::TapjFormatter.new(qa_trace, tapj_conduit)
   # create reporter with json formatter
-  reporter = RSpec::Core::Reporter.new(rspec_config)
+  reporter = ::RSpec::Core::Reporter.new(rspec_config)
   # internal hack
   # api may not be stable, make sure lock down Rspec version
   loader = rspec_config.send(:formatter_loader)
-  notifications = loader.send(:notifications_for, RSpec::TapjFormatter)
+  notifications = loader.send(:notifications_for, ::Qa::Rspec::TapjFormatter)
   reporter.register_listener(formatter, *notifications)
 
   if opt.dry_run

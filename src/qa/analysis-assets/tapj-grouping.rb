@@ -206,7 +206,9 @@ accepted_ids, accepted, discarded_ids, discarded = filter.process(
   $stdout.puts(JSON.generate(t))
 end
 
-$stderr.printf("discarded %4d/%4d ids, %4d/%4d records",
-    discarded_ids, discarded_ids + accepted_ids,
-    discarded, accepted + discarded)
-$stderr.puts(": #{me} #{ARGV.join(' ')}")
+# $stderr.printf("discarded %4d/%4d ids, %4d/%4d records",
+#     discarded_ids, discarded_ids + accepted_ids,
+#     discarded, accepted + discarded)
+# $stderr.puts(": #{me} #{ARGV.join(' ')}")
+
+$stderr.puts

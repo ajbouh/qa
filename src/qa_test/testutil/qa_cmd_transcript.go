@@ -11,29 +11,29 @@ import (
 type Transcript struct {
 	Stderr            string
 	Events            []interface{}
-	SuiteEvents       []tapjio.SuiteEvent
-	TestEvents        []tapjio.TestEvent
-	TestStartedEvents []tapjio.TestStartedEvent
+	SuiteBeginEvents       []tapjio.SuiteBeginEvent
+	TestFinishEvents        []tapjio.TestFinishEvent
+	TestBeginEvents []tapjio.TestBeginEvent
 	TraceEvents       []tapjio.TraceEvent
-	FinalEvents       []tapjio.FinalEvent
+	SuiteFinishEvents       []tapjio.SuiteFinishEvent
 }
 
 func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
 	tscript := &Transcript{}
 	return tscript, &tapjio.DecodingCallbacks{
-		OnSuite: func(event tapjio.SuiteEvent) error {
+		OnSuiteBegin: func(event tapjio.SuiteBeginEvent) error {
 			tscript.Events = append(tscript.Events, event)
-			tscript.SuiteEvents = append(tscript.SuiteEvents, event)
+			tscript.SuiteBeginEvents = append(tscript.SuiteBeginEvents, event)
 			return nil
 		},
-		OnTestBegin: func(event tapjio.TestStartedEvent) error {
+		OnTestBegin: func(event tapjio.TestBeginEvent) error {
 			tscript.Events = append(tscript.Events, event)
-			tscript.TestStartedEvents = append(tscript.TestStartedEvents, event)
+			tscript.TestBeginEvents = append(tscript.TestBeginEvents, event)
 			return nil
 		},
-		OnTest: func(event tapjio.TestEvent) error {
+		OnTestFinish: func(event tapjio.TestFinishEvent) error {
 			tscript.Events = append(tscript.Events, event)
-			tscript.TestEvents = append(tscript.TestEvents, event)
+			tscript.TestFinishEvents = append(tscript.TestFinishEvents, event)
 			return nil
 		},
 		OnTrace: func(event tapjio.TraceEvent) error {
@@ -41,9 +41,9 @@ func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
 			tscript.TraceEvents = append(tscript.TraceEvents, event)
 			return nil
 		},
-		OnFinal: func(event tapjio.FinalEvent) error {
+		OnSuiteFinish: func(event tapjio.SuiteFinishEvent) error {
 			tscript.Events = append(tscript.Events, event)
-			tscript.FinalEvents = append(tscript.FinalEvents, event)
+			tscript.SuiteFinishEvents = append(tscript.SuiteFinishEvents, event)
 			return nil
 		},
 	}
@@ -51,7 +51,7 @@ func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
 
 type QaCmd func(*cmd.Env, []string) error
 
-func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, dir string, args []string) (stderr string, err error) {
+func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, args []string) (stderr string, err error) {
 	var stderrBuf bytes.Buffer
 
 	rd, wr := io.Pipe()
@@ -60,7 +60,7 @@ func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, dir string, args []string) (stde
 
 	errCh := make(chan error, 2)
 	go func() {
-    env := &cmd.Env{Stdout: wr, Stderr: os.Stderr, Stdin: bytes.NewBuffer([]byte{}), Dir: dir}
+    env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: os.Stderr, Dir: dir}
 		errCh <- fn(env, args)
 
 		wr.Close()

@@ -53,22 +53,18 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 	for _, lib := range cfg.Rubylib {
 		args = append(args, "-I", lib)
 	}
-	address, err := srv.ExposeChannel(requestCh)
+
+	// TODO(adamb) check currently ignored errChan
+	address, requestErrChan, err := srv.ExposeChannel(requestCh)
 	if err != nil {
 		return nil, err
 	}
+
 	args = append(args,
 		"-e", sharedCode,
 		"-e", runnerCode,
 		"--",
 		address)
-
-	// First request is a list of worker environments and list of all test files to require.
-	requestCh <- map[string](interface{}){
-		"workerEnvs":  workerEnvs,
-		"files":       files,
-		"passthrough": runnerCfg.PassthroughConfig,
-	}
 
 	for _, traceProbe := range runnerCfg.TraceProbes {
 		args = append(args, "--trace-probe", traceProbe)
@@ -97,6 +93,13 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 		return nil, err
 	}
 
+	// First request is a list of worker environments and list of all test files to require.
+	requestCh <- map[string](interface{}){
+		"workerEnvs":  workerEnvs,
+		"files":       files,
+		"passthrough": runnerCfg.PassthroughConfig,
+	}
+
 	ctx := &context{
 		requestCh: requestCh,
 		addresses: []string{},
@@ -105,6 +108,13 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 		process:   cmd.Process,
 		mutex:     &sync.Mutex{},
 	}
+
+	go func() {
+		_, ok := <-requestErrChan
+		if ok {
+			ctx.Close()
+		}
+	}()
 
 	go func() {
 		defer ctx.cleanupAfterProcessDone()
@@ -121,6 +131,11 @@ func (self *context) cleanupAfterProcessDone() {
 	m.Unlock()
 
 	self.cancelAllVisitorSubscriptions()
+
+	m.Lock()
+	close(self.requestCh)
+	self.requestCh = nil
+	m.Unlock()
 }
 
 // TODO(adamb) Should also cancel all existing waitgroups
@@ -147,7 +162,7 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 			traceEvents = append(traceEvents, trace)
 			return
 		},
-		OnTest: func(test tapjio.TestEvent) error {
+		OnTestFinish: func(test tapjio.TestFinishEvent) error {
 			squashPolicy := cfg.RunnerConfig.SquashPolicy
 			if squashPolicy == runner.SquashNothing ||
 				squashPolicy == runner.SquashByFile && (currentRunner == nil || currentRunner.file != test.File) ||
@@ -156,12 +171,22 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 					testRunners = append(testRunners, *currentRunner)
 				}
 				currentRunner = &rubyRunner{
-					ctx:     self,
-					file:    test.File,
-					filters: []string{},
+					ctx:        self,
+					file:       test.File,
+					filters:    []tapjio.TestFilter{},
+					depEntries: []runner.TestDependencyEntry{},
 				}
 			}
 			currentRunner.filters = append(currentRunner.filters, test.Filter)
+			if test.Dependencies != nil {
+				depEntry := runner.TestDependencyEntry{
+					Label:        tapjio.TestLabel(test.Label, test.Cases),
+					File:         test.File,
+					Filter:       test.Filter,
+					Dependencies: *test.Dependencies,
+				}
+				currentRunner.depEntries = append(currentRunner.depEntries, depEntry)
+			}
 			return nil
 		},
 		OnEnd: func(reason error) error {
@@ -175,13 +200,19 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 		return
 	}
 
-	self.request(
-		map[string]string{},
-		[]string{
-			"--dry-run",
-			"--seed", fmt.Sprintf("%v", cfg.RunnerConfig.Seed),
-			"--tapj-sink", serverAddress,
-		})
+	args := []string{
+		"--dry-run",
+		"--seed", fmt.Sprintf("%v", cfg.RunnerConfig.Seed),
+		"--tapj-sink", serverAddress,
+	}
+	for _, filter := range cfg.RunnerConfig.Filters {
+		args = append(args, filter.String())
+	}
+
+	if err = self.request(map[string]string{}, args); err != nil {
+		self.srv.Cancel(serverAddress)
+		return
+	}
 
 	err = <-errChan
 	return
@@ -217,18 +248,27 @@ func (self *context) cancelAllVisitorSubscriptions() {
 	}
 }
 
-func (self *context) request(env map[string]string, args []string) {
-	r := []interface{}{
-		env,
-		args,
+func (self *context) request(env map[string]string, args []string) error {
+	m := self.mutex
+	m.Lock()
+	defer m.Unlock()
+	if self.requestCh != nil {
+		r := []interface{}{
+			env,
+			args,
+		}
+		self.requestCh <- r
+		return nil
+	} else {
+		return errors.New("Already closed")
 	}
-	self.requestCh <- r
 }
 
 type rubyRunner struct {
-	ctx     *context
-	file    string
-	filters []string
+	ctx        *context
+	file       tapjio.FilePath
+	filters    []tapjio.TestFilter
+	depEntries []runner.TestDependencyEntry
 }
 
 func (self rubyRunner) TestCount() int {
@@ -237,7 +277,7 @@ func (self rubyRunner) TestCount() int {
 
 // debitFilter returns a new slice, with the given string removed from the given slice. Returns
 // an error if the given string is not present.
-func debitFilter(filters []string, filter string, kind string, saw []string) ([]string, error) {
+func debitFilter(filters []tapjio.TestFilter, filter tapjio.TestFilter, kind string, saw []tapjio.TestFilter) ([]tapjio.TestFilter, error) {
 	for i, f := range filters {
 		if filter == f {
 			return append(filters[:i], filters[i+1:]...), nil
@@ -245,7 +285,11 @@ func debitFilter(filters []string, filter string, kind string, saw []string) ([]
 	}
 
 	return filters, errors.New(
-		fmt.Sprintf("Unexpected %s test filter: %s. Expected one of %v. Saw %v", kind, filter, filters, saw))
+		fmt.Sprintf("Unexpected %s test filter: %s. Expected one of %v. Already saw %v", kind, filter, filters, saw))
+}
+
+func (self rubyRunner) Dependencies() []runner.TestDependencyEntry {
+	return self.depEntries
 }
 
 // Run executes the rubyRunner's tests with the given environment variables. Events triggered
@@ -254,25 +298,25 @@ func debitFilter(filters []string, filter string, kind string, saw []string) ([]
 // NOTE(adamb) It is not careful about ensuring the test is no longer running in the case of an
 //     error.
 func (self rubyRunner) Run(env map[string]string, visitor tapjio.Visitor) error {
-	var allowedBeginFilters, allowedFinishFilters []string
+	var allowedBeginFilters, allowedFinishFilters []tapjio.TestFilter
 	allowedBeginFilters = append(allowedBeginFilters, self.filters...)
-	sawBeginFilters := []string{}
+	sawBeginFilters := []tapjio.TestFilter{}
 	allowedFinishFilters = append(allowedFinishFilters, self.filters...)
-	sawFinishFilters := []string{}
+	sawFinishFilters := []tapjio.TestFilter{}
 
 	bothVisitors := tapjio.MultiVisitor(
 		[]tapjio.Visitor{
 			&tapjio.DecodingCallbacks{
-				OnTestBegin: func(event tapjio.TestStartedEvent) error {
-					sawBeginFilters = append(sawBeginFilters, event.Filter)
+				OnTestBegin: func(event tapjio.TestBeginEvent) error {
 					var err error
 					allowedBeginFilters, err = debitFilter(allowedBeginFilters, event.Filter, "begin", sawBeginFilters)
+					sawBeginFilters = append(sawBeginFilters, event.Filter)
 					return err
 				},
-				OnTest: func(event tapjio.TestEvent) error {
-					sawFinishFilters = append(sawFinishFilters, event.Filter)
+				OnTestFinish: func(event tapjio.TestFinishEvent) error {
 					var err error
 					allowedFinishFilters, err = debitFilter(allowedFinishFilters, event.Filter, "finish", sawFinishFilters)
+					sawFinishFilters = append(sawFinishFilters, event.Filter)
 					return err
 				},
 				OnEnd: func(reason error) error {
@@ -295,12 +339,20 @@ func (self rubyRunner) Run(env map[string]string, visitor tapjio.Visitor) error 
 		return err
 	}
 
-	self.ctx.request(
+	filterArgs := make([]string, len(self.filters))
+	for ix, filter := range self.filters {
+		filterArgs[ix] = string(filter)
+	}
+
+	if err = self.ctx.request(
 		env,
 		append([]string{
 			"--seed", fmt.Sprintf("%v", self.ctx.config.RunnerConfig.Seed),
 			"--tapj-sink", address,
-		}, self.filters...))
+		}, filterArgs...)); err != nil {
+		self.ctx.srv.Cancel(address)
+		return err
+	}
 
 	return <-errChan
 }

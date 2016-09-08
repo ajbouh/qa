@@ -1,120 +1,140 @@
 package run
 
 import (
-	"errors"
 	"flag"
-	"fmt"
+	"io"
+	"io/ioutil"
 	"os"
 	"os/signal"
-	"syscall"
-	"time"
-
 	"qa/cmd"
+	"qa/fileevents"
+	"qa/run"
 	"qa/runner"
-	"qa/runner/ruby"
-	"qa/runner/server"
 	"qa/tapjio"
+	"qa/watch"
+	"sync"
+	"syscall"
 )
 
-type Env struct {
-	Seed          int
-	SuiteLabel    string
-	SuiteCoderef  string
-	WorkerEnvs    []map[string]string
-	RunnerConfigs []runner.Config
-	Visitor       tapjio.Visitor
-	Server        *server.Server
-}
-
-type contextStarter func(
-	srv *server.Server,
-	workerEnvs []map[string]string,
-	runnerConfig runner.Config) (runner.Context, error)
-
-func rubyContextStarter(runnerAssetName string) contextStarter {
-	return func(
-		srv *server.Server,
-		workerEnvs []map[string]string,
-		runnerConfig runner.Config) (runner.Context, error) {
-
-		config := &ruby.ContextConfig{
-			RunnerConfig:    runnerConfig,
-			Rubylib:         []string{"spec", "lib", "test"},
-			RunnerAssetName: runnerAssetName,
-		}
-
-		ctx, err := ruby.StartContext(srv, workerEnvs, config)
-		if err != nil {
-			return nil, err
-		}
-
-		return ctx, nil
-	}
-}
-
-var starters = map[string]contextStarter{
-	"rspec":     rubyContextStarter("ruby/rspec.rb"),
-	"minitest":  rubyContextStarter("ruby/minitest.rb"),
-	"test-unit": rubyContextStarter("ruby/test-unit.rb"),
-}
-
-func Run(env *Env) (tapjio.FinalEvent, error) {
-	var final tapjio.FinalEvent
-	startTime := time.Now().UTC()
-	visitor := env.Visitor
-
-	var testRunners []runner.TestRunner
-	count := 0
-	for _, runnerConfig := range env.RunnerConfigs {
-		starter, ok := starters[runnerConfig.Name]
-		if !ok {
-			return final, errors.New("Could not find starter: " + runnerConfig.Name)
-		}
-
-		ctx, err := starter(env.Server, env.WorkerEnvs, runnerConfig)
-		if err != nil {
-			return final, err
-		}
-		defer ctx.Close()
-
-		traceEvents, runners, err := ctx.EnumerateRunners()
-		if err != nil {
-			return final, err
-		}
-
-		for _, runner := range runners {
-			count += runner.TestCount()
-		}
-
-		testRunners = append(testRunners, runners...)
-
-		for _, traceEvent := range traceEvents {
-			err := visitor.TraceEvent(traceEvent)
-			if err != nil {
-				return final, err
+func trapSignals(closers []io.Closer, stdin io.Reader, stderr io.Writer) func() {
+	// Handle common process-killing signals so we can gracefully shut down:
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, os.Kill, syscall.SIGTERM)
+	go func(c chan os.Signal) {
+		// Wait for signal
+		_, ok := <-c
+		if ok {
+			for _, closer := range closers {
+				defer closer.Close()
 			}
 		}
+	}(sigc)
+
+	if stdin != nil {
+		go func() {
+			for _, closer := range closers {
+				defer closer.Close()
+			}
+			io.Copy(ioutil.Discard, stdin)
+		}()
 	}
 
-	suiteEvent := tapjio.NewSuiteEvent(startTime, count, env.Seed)
-	suiteEvent.Label = env.SuiteLabel
-	suiteEvent.Coderef = env.SuiteCoderef
-	err := visitor.SuiteStarted(*suiteEvent)
+	return func() {
+		defer signal.Stop(sigc)
+		defer close(sigc)
+	}
+}
+
+func Watch(watches []*watch.Watch) error {
+	runEnvChan := make(chan *run.Env)
+
+	wg := &sync.WaitGroup{}
+	for _, w := range watches {
+		wg.Add(1)
+		go func(w *watch.Watch) {
+			defer wg.Done()
+			w.ProcessSubscriptionEvents(runEnvChan)
+		}(w)
+
+		w.WriteStatus()
+	}
+
+	go func() {
+		wg.Wait()
+		close(runEnvChan)
+	}()
+
+	// Try to run each runEnv sequentially.
+	for runEnv := range runEnvChan {
+		_, err := run.Run(runEnv)
+		if err != nil {
+			return err
+		}
+
+		for _, w := range watches {
+			w.WriteStatus()
+		}
+	}
+
+	return nil
+}
+
+func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
+	srv := runEnv.Server
+	defer srv.Close()
+
+	closers := []io.Closer{
+		srv,
+	}
+
+	var err error
+	var watcher fileevents.Watcher
+	var watches []*watch.Watch
+
+	if shouldWatch {
+		watcher, err = fileevents.StartWatchman("/tmp/watchman")
+		if err != nil {
+			return err
+		}
+		defer watcher.Close()
+
+		closers = append(closers, watcher)
+
+		for _, runnerConfig := range runEnv.RunnerConfigs {
+			dir, expr, err := watch.RunnerConfigToWatchExpression(runnerConfig, []tapjio.FilePath{})
+			if err != nil {
+				return nil
+			}
+
+			sub, err := watcher.Subscribe(dir, "tests", expr)
+			if err != nil {
+				return nil
+			}
+			defer sub.Close()
+			closers = append(closers, sub)
+
+			w := watch.NewWatch(cmdEnv.Stderr, dir, runEnv, sub, runnerConfig)
+			watches = append(watches, w)
+		}
+	}
+
+	cleanupTrap := trapSignals(closers, cmdEnv.Stdin, cmdEnv.Stderr)
+	defer cleanupTrap()
+
+	if watcher != nil {
+		return Watch(watches)
+	}
+
+	passed, err := run.Run(runEnv)
 	if err != nil {
-		return final, err
+		return err
 	}
 
-	final = *tapjio.NewFinalEvent(suiteEvent)
-	err = runner.RunAll(visitor, env.WorkerEnvs, final.Counts, testRunners)
-
-	final.Time = time.Now().UTC().Sub(startTime).Seconds()
-
-	finalErr := visitor.SuiteFinished(final)
-	if err == nil {
-		err = finalErr
+	if passed {
+		return nil
 	}
 
-	return final, err
+	return &cmd.QuietError{1}
 }
 
 func Main(env *cmd.Env, args []string) error {
@@ -126,38 +146,38 @@ func Main(env *cmd.Env, args []string) error {
 		return err
 	}
 
-	runEnv, err := f.NewEnv(env, flags.Args())
+	f.ApplyImpliedDefaults()
+	runnerConfigs := f.ParseRunnerConfigs(env, flags.Args())
+	runEnv, err := f.NewEnv(env, runnerConfigs)
 	if err != nil {
 		return err
 	}
 
-	srv := runEnv.Server
-	defer srv.Close()
-	go srv.Run()
+	return gogogo(env, runEnv, f.Watch())
+}
 
-	// Handle common process-killing signals so we can gracefully shut down:
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, os.Interrupt, os.Kill, syscall.SIGTERM)
-	go func(c chan os.Signal) {
-		// Wait for signal
-		sig, ok := <-c
-		if ok {
-			fmt.Fprintln(env.Stderr, "Got signal:", sig)
-			srv.Close()
-		}
-	}(sigc)
-	defer signal.Stop(sigc)
-	defer close(sigc)
+func Framework(frameworkName string, env *cmd.Env, args []string) error {
+	flags := flag.NewFlagSet(frameworkName, flag.ContinueOnError)
 
-	var final tapjio.FinalEvent
-	final, err = Run(runEnv)
+	f := DefineFlags(flags)
+	err := flags.Parse(args)
 	if err != nil {
 		return err
 	}
 
-	if !final.Passed() {
-		return errors.New("Test(s) failed.")
+	f.ApplyImpliedDefaults()
+
+	runnerArgs := flags.Args()
+	if len(runnerArgs) == 0 {
+		runnerArgs = []string{run.DefaultGlob(frameworkName)}
+	}
+	runEnv, err := f.NewEnv(env, []runner.Config{
+		f.NewRunnerConfig(env, frameworkName, runnerArgs),
+	})
+
+	if err != nil {
+		return err
 	}
 
-	return nil
+	return gogogo(env, runEnv, f.Watch())
 }

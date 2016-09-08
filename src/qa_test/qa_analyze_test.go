@@ -235,7 +235,6 @@ func TestSummary(t *testing.T) {
 		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_registration"],
 		"mean": {"pass": 74.846147},
 		"median": {"pass": 74.846147},
-		"std_dev": {"pass": 22.855770061885902},
 		"count": {"pass": 2},
 		"total-count": 2, "pass-count": 2, "fail-count": 0
 	},
@@ -243,7 +242,6 @@ func TestSummary(t *testing.T) {
 		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_remembering"],
 		"mean": {"pass": 34.0779615},
 		"median": {"pass": 34.0779615},
-		"std_dev": {"pass": 0.8973050702968839},
 		"count": {"pass": 2},
 		"total-count": 2, "pass-count": 2, "fail-count": 0
 	},
@@ -251,7 +249,6 @@ func TestSummary(t *testing.T) {
 		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_failing_build"],
 		"mean": {"pass": 64.05913749999999},
 		"median": {"pass": 64.05913749999999},
-		"std_dev": {"pass": 23.171006043113454},
 		"count": {"pass": 2},
 		"total-count": 2, "pass-count": 2, "fail-count": 0
 	},
@@ -259,7 +256,6 @@ func TestSummary(t *testing.T) {
 		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_passing_build"],
 		"mean": {"pass": 19.76621775},
 		"median": {"pass": 21.482759},
-		"std_dev": {"pass": 4.154955093996914},
 		"count": {"pass": 4},
 		"total-count": 4, "pass-count": 4, "fail-count": 0
 	},
@@ -267,7 +263,6 @@ func TestSummary(t *testing.T) {
 	"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["ConversationCloseTest"], "test_esc_close"],
 		"mean": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
 		"median": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
-		"std_dev": {"pass": 0.0, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.0},
 		"count": {"pass": 1, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 1},
 		"total-count": 2, "pass-count": 1, "fail-count": 1
 	},
@@ -275,7 +270,6 @@ func TestSummary(t *testing.T) {
 	"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestAnnotations"], "test_annotations"],
 		"mean": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
 		"median": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
-		"std_dev": {"pass": 0.0, "error:609635f9467fd88c85143d469a04654025fcdd00": 0.0},
 		"count": {"pass": 1, "error:609635f9467fd88c85143d469a04654025fcdd00": 1},
 		"total-count": 2, "pass-count": 1, "fail-count": 1
 	},
@@ -283,7 +277,6 @@ func TestSummary(t *testing.T) {
 		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestMerges"], "test_slave_interval_scheduler"],
 		"mean": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
 		"median": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
-		"std_dev": {"pass": 0.0, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 0.0},
 		"count": {"pass": 1, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 1},
 		"total-count": 2, "pass-count": 1, "fail-count": 1
 	}

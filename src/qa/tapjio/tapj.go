@@ -23,7 +23,7 @@ func (t *tapj) TraceEvent(event TraceEvent) error {
 	return t.encoder.Encode(event)
 }
 
-func (t *tapj) SuiteStarted(event SuiteEvent) error {
+func (t *tapj) SuiteBegin(event SuiteBeginEvent) error {
 	return t.encoder.Encode(event)
 }
 
@@ -45,7 +45,7 @@ func (t *tapj) ensureTestCases(cases []CaseEvent) error {
 	return nil
 }
 
-func (t *tapj) TestStarted(event TestStartedEvent) error {
+func (t *tapj) TestBegin(event TestBeginEvent) error {
 	// Since this isn't properly represented by TAP-J, no need to emit it!
 	err := t.ensureTestCases(event.Cases)
 	if err != nil {
@@ -55,7 +55,7 @@ func (t *tapj) TestStarted(event TestStartedEvent) error {
 	return t.encoder.Encode(event)
 }
 
-func (t *tapj) TestFinished(event TestEvent) error {
+func (t *tapj) TestFinish(event TestFinishEvent) error {
 	err := t.ensureTestCases(event.Cases)
 	if err != nil {
 		return err
@@ -64,7 +64,7 @@ func (t *tapj) TestFinished(event TestEvent) error {
 	return t.encoder.Encode(event)
 }
 
-func (t *tapj) SuiteFinished(event FinalEvent) error {
+func (t *tapj) SuiteFinish(event SuiteFinishEvent) error {
 	return t.encoder.Encode(event)
 }
 

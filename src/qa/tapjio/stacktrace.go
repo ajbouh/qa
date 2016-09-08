@@ -196,19 +196,19 @@ func (t *stacktraceEmitter) TraceEvent(event TraceEvent) error {
 	return nil
 }
 
-func (t *stacktraceEmitter) TestStarted(event TestStartedEvent) error {
+func (t *stacktraceEmitter) TestBegin(event TestBeginEvent) error {
 	return nil
 }
 
-func (t *stacktraceEmitter) SuiteFinished(event FinalEvent) error {
+func (t *stacktraceEmitter) SuiteFinish(event SuiteFinishEvent) error {
 	return nil
 }
 
-func (t *stacktraceEmitter) SuiteStarted(event SuiteEvent) error {
+func (t *stacktraceEmitter) SuiteBegin(event SuiteBeginEvent) error {
 	return nil
 }
 
-func (t *stacktraceEmitter) TestFinished(event TestEvent) error {
+func (t *stacktraceEmitter) TestFinish(event TestFinishEvent) error {
 	return nil
 }
 

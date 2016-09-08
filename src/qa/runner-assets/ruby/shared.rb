@@ -1,8 +1,300 @@
 $__qa_stderr = $stderr.dup
 
+$__qa_load_event_queue = nil
+
+require 'digest/sha2'
+
+module Kernel
+  alias_method :__qa_original_require, :require
+  def require(name)
+    file_stack = (Thread.current[:__qa_current_file] ||= [])
+    prev = file_stack[-1]
+
+    file_stack.push([:require, name])
+    result = __qa_original_require(name)
+
+    if $__qa_load_event_queue
+      entry = {
+        operation: :require,
+        name: name,
+        prev: prev
+      }
+      # $__qa_stderr.puts "enqueuing load event: #{entry}"
+      $__qa_load_event_queue.enq(entry)
+    end
+
+    result
+  rescue LoadError
+    unless $!.instance_variable_get(:@__qa_load_path)
+      $!.instance_variable_set(:@__qa_load_path, $LOAD_PATH.dup)
+    end
+
+    unless $!.instance_variable_get(:@__qa_path)
+      $!.instance_variable_set(:@__qa_path, $!.path)
+    end
+
+    raise
+  ensure
+    file_stack.pop if file_stack
+  end
+
+  # Since the native implementation of require_relative peeks at the
+  # stack, we need to simulate its behavior in ruby, by ourselves
+  # peeking at the stack.
+  alias_method :__qa_original_require_relative, :require_relative
+  QA_FEATURE_EXTENSIONS = [".rb", "", ".so", ".o", ".dll"]
+  def require_relative(name)
+    file_stack = (Thread.current[:__qa_current_file] ||= [])
+    prev = file_stack[-1]
+
+    calling_absolute_path = Kernel.caller_locations(1, 1)[0].absolute_path
+    caller_dir = File.dirname(calling_absolute_path)
+    loaded_feature_base = File.expand_path(name, caller_dir)
+    loaded_feature = loaded_feature_base
+    QA_FEATURE_EXTENSIONS.each do |ext|
+      path = loaded_feature_base + ext
+      if File.file?(path)
+        loaded_feature = path
+        break
+      end
+    end
+
+    file_stack.push([:require_relative, loaded_feature])
+
+    result = __qa_original_require(loaded_feature)
+
+    if $__qa_load_event_queue
+      entry = {
+        operation: :require_relative,
+        loaded_feature: loaded_feature,
+        prev: prev,
+      }
+      # $__qa_stderr.puts "enqueuing load event: #{entry}"
+      $__qa_load_event_queue.enq(entry)
+    end
+
+    result
+  rescue LoadError
+    unless $!.instance_variable_get(:@__qa_path)
+      $!.instance_variable_set(:@__qa_path, $!.path)
+    end
+
+    raise
+  ensure
+    file_stack.pop if file_stack
+  end
+
+  alias_method :__qa_original_load, :load
+  def load(path, wrap=false)
+    file_stack = (Thread.current[:__qa_current_file] ||= [])
+    prev = file_stack[-1]
+
+    loaded_feature = File.expand_path(path)
+
+    file_stack.push([:load, loaded_feature])
+    result = __qa_original_load(path, wrap)
+
+    if $__qa_load_event_queue
+      entry = {
+        operation: :load,
+        path: path,
+        loaded_feature: loaded_feature,
+        prev: prev,
+      }
+      # $__qa_stderr.puts "enqueuing load event: #{entry}"
+      $__qa_load_event_queue.enq(entry)
+    end
+
+    result
+  rescue LoadError
+    unless $!.instance_variable_get(:@__qa_path)
+      $!.instance_variable_set(:@__qa_path, loaded_feature)
+    end
+
+    raise
+  ensure
+    file_stack.pop if file_stack
+  end
+end
+
+
 module Qa; end
 
-module Qa::Binding
+require 'thread'
+require 'set'
+class ::Qa::LoadTracking
+  class FileDigestPool
+    def initialize(digests)
+      @recently_added_files = []
+      @digests = digests
+      @index_by_file = Hash.new { |h, k| @recently_added_files.push(k); h[k] = h.size }
+    end
+
+    def intern(files)
+      file_indices = []
+      files.each do |file|
+        file_indices.push(@index_by_file[file])
+      end
+
+      if @recently_added_files.empty?
+        return nil, nil, file_indices
+      end
+
+      recently_added_files, @recently_added_files = @recently_added_files, []
+      recently_added_digests = Array.new(recently_added_files.size)
+      recently_added_files.each_with_index do |file, ix|
+        recently_added_digests[ix] = @digests[file]
+      end
+
+      return recently_added_files, recently_added_digests, file_indices
+    end
+  end
+
+  FEATURE_EXTENSIONS = [
+    ".rb",
+    "",
+    ".so",
+    ".o",
+    ".dll",
+  ]
+
+  def initialize
+    @digests = {}
+    @loaded_feature_cache = []
+    @loaded_files_by_file = Hash.new { |h, k| h[k] = Set.new }
+    @previous_loaded_features_length = 0
+  end
+
+  def new_file_digest_pool
+    ::Qa::LoadTracking::FileDigestPool.new(@digests)
+  end
+
+  def files_loaded_by(feature_path)
+    @loaded_files_by_file[feature_path]
+  end
+
+  def during(prev_default)
+    trap_begin
+    yield
+  ensure
+    trap_end(prev_default)
+  end
+
+  def trap_begin
+    @orig_queue, $__qa_load_event_queue = $__qa_load_event_queue, Queue.new
+
+    nil
+  end
+
+  def trap_end(default_prev)
+    $__qa_load_event_queue, queue = @orig_queue, $__qa_load_event_queue
+    @orig_queue = nil
+
+    events = Array.new(queue.length)
+    queue.length.times { |n| events[n] = queue.pop }
+
+    index_recently_loaded_feature_paths!
+
+    events.each do |e|
+      unless loaded_feature = (e[:loaded_feature] || lookup_loaded_feature(e[:name]))
+        next
+      end
+
+      next unless prev = e[:prev] || default_prev
+      calling_absolute_path = case prev[0]
+      when :require
+        lookup_loaded_feature(prev[1])
+      when :require_relative
+        prev[1]
+      when :load
+        prev[1]
+      when :all
+        :all
+      end
+
+      recursive_add_feature(calling_absolute_path, loaded_feature)
+    end
+
+    nil
+  end
+
+  private
+
+  def lookup_loaded_feature(required_feature)
+    if value = @loaded_feature_cache.bsearch { |elt| required_feature <=> elt[0] }
+      return value[1]
+    end
+
+    return required_feature if File.exist?(required_feature)
+    return nil
+  end
+
+  def index_recently_loaded_feature_paths!
+    if @previous_loaded_features_length == 0
+      loaded_features = $LOADED_FEATURES.sort
+    else
+      loaded_features = $LOADED_FEATURES[@previous_loaded_features_length..-1]
+      loaded_features.sort!
+    end
+
+    unless loaded_features.empty?
+      @previous_loaded_features_length = $LOADED_FEATURES.length
+      load_path = $LOAD_PATH.map { |s| s.is_a?(String) ? s : s.to_s }
+      load_path.sort!
+
+      load_path_ix = 0
+      load_path_entry = load_path[load_path_ix]
+      load_path_entry_length = load_path_entry.length
+      sep = File::SEPARATOR
+      for loaded_feature in loaded_features
+        ext_len = File.extname(loaded_feature).length
+        loaded_feature_no_ext = loaded_feature[0...(-ext_len)]
+
+        if loaded_feature.start_with?(load_path_entry) && loaded_feature[load_path_entry_length] == sep
+          loaded_feature_subpath = loaded_feature[(load_path_entry_length+1)..-1]
+          @loaded_feature_cache.push([loaded_feature_subpath, loaded_feature])
+          loaded_feature_subpath_no_ext = loaded_feature_subpath[0...(-ext_len)]
+          @loaded_feature_cache.push([loaded_feature_subpath_no_ext, loaded_feature])
+        elsif loaded_feature > load_path_entry
+          load_path_ix += 1
+          if load_path_entry = load_path[load_path_ix]
+            load_path_entry_length = load_path_entry.length
+            redo
+          else
+            break
+          end
+        end
+
+        @loaded_feature_cache.push([loaded_feature_no_ext, loaded_feature])
+      end
+
+      @loaded_feature_cache.sort!
+    end
+  end
+
+  def recursive_add_feature(caller_path, feature_path)
+    loaded_feature_set = @loaded_files_by_file[caller_path]
+    return unless loaded_feature_set.add?(feature_path)
+
+    digest_for_feature_path(feature_path)
+    @loaded_files_by_file[feature_path].each do |path|
+      recursive_add_feature(caller_path, path)
+    end
+  end
+
+  def digest_for_feature_path(feature_path)
+    if digest = @digests[feature_path]
+      digest
+    end
+
+    digest = File.file?(feature_path) ? Digest::SHA2.file(feature_path).hexdigest : ""
+    @digests[feature_path] = digest
+
+    digest
+  end
+end
+
+module ::Qa::Binding
   begin
     # From https://github.com/banister/binding_of_caller/issues/57
     # Thanks to Steve Shreeve <steve.shreeve@gmail.com>
@@ -784,6 +1076,17 @@ module Qa::TapjExceptions
       raw_file = $1
       line = $2.to_i
       method = $3
+      block_level = 0
+
+      # e.g.: block (2 levels) in run
+      if method =~ /^block \((\d+) levels?\) in (.*)$/
+        block_level = $1.to_i
+        method = $2
+      # e.g.: block in run
+      elsif method =~ /^block in (.*)$/
+        block_level = 1
+        method = $1
+      end
 
       if prefix = load_path.find { |p| raw_file.start_with?(p) }
         file = raw_file[(prefix.length+1)..-1]
@@ -793,13 +1096,11 @@ module Qa::TapjExceptions
 
       h = {"raw-file" => raw_file, "line" => line, "file" => file}
       h["method"] = method if method
+      h["block_level"] = block_level if block_level && block_level > 0
+
       if backtrace_bindings && b = backtrace_bindings[index]
-        method, locals = b.eval("[__method__, local_variables]")
-        if h['method'] == method
-          h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
-        else
-          $__qa_stderr.puts "mismatch: '#{entry}' doesn't end with: '#{method}'"
-        end
+        locals = b.eval("local_variables")
+        h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
       end
 
       h
@@ -814,29 +1115,37 @@ module Qa::TapjExceptions
       snippet.update(code_snippet(raw_file, line))
     end
 
-    {
+    h = {
       'message'   => message.strip,
       'class'     => error.class.name,
       'snippets'  => snippets,
       'backtrace' => backtrace,
     }
+
+    if error.is_a?(LoadError)
+      h['load_error_path'] = error.instance_variable_get(:@__qa_path) || error.path
+      if load_path = error.instance_variable_get(:@__qa_load_path)
+        h['load_error_load_path'] = load_path
+      end
+    end
+
+    h
   end
 
   # Clean the backtrace of any reference to test framework itself.
-  def filter_backtrace(backtrace)
-    trace = backtrace
-
+  def filter_backtrace(bt)
     # eliminate ourselves from the list.
-    trace = trace.select { |e| !e['file'].start_with?("-e") }
+    mt_re = %r%minitest.rb|minitest/%
 
-    ## if the backtrace is empty now then revert to the original
-    trace = backtrace if trace.empty?
+    new_bt = bt.take_while { |e| f = e['file']; f !~ mt_re && !f.start_with?("-e") }
+    new_bt = bt.select     { |e| f = e['file']; f !~ mt_re && !f.start_with?("-e") } if new_bt.empty?
+    new_bt = bt.dup                                                                 if new_bt.empty?
 
     ## simplify paths to be relative to current working diectory
     here = Dir.pwd+File::SEPARATOR
-    trace.each { |e| e['file'] = e['file'].sub(here,'') }
+    new_bt.each { |e| e['file'] = e['file'].sub(here,'') }
 
-    trace
+    new_bt
   end
 
   # (number of surrounding lines to show)
@@ -893,11 +1202,19 @@ class ::Qa::TapjConduit
   # TAP-Y/J Revision
   REVISION = 4
 
-  def initialize(upstream)
+  def initialize(load_tracking, upstream)
     @upstream = upstream
+    @load_tracking = load_tracking
+    @loaded_feature_digest_pool = load_tracking.new_file_digest_pool
+
     @mutex = Mutex.new
 
+    # Maps "absolute path" to [list absolute paths that might have been used, if present]
+    @missing_file_dependencies = {}
+
+    # List of test events we should emit after the suite event.
     @preloaded_test_events = []
+
     @total_count = 0
     @fail_count = 0
     @error_count = 0
@@ -906,20 +1223,27 @@ class ::Qa::TapjConduit
     @todo_count = 0
   end
 
-  def emit_test_begin_event(start_time, label, subtype, filter)
+  def emit_test_begin_event(start_time, label, subtype, filter, file=nil)
     emit(
         'type' => 'note',
         'qa:type' => 'test:begin',
         'qa:timestamp' => ::Qa::Time.at_f(start_time),
         'qa:label' => label,
         'qa:subtype' => subtype,
-        'qa:filter' => filter)
+        'qa:filter' => filter,
+        'qa:file' => file)
     flush
   end
 
   def preloaded_test_events=(events)
     @mutex.synchronize do
       @preloaded_test_events = events.dup
+    end
+  end
+
+  def missing_file_dependencies=(deps)
+    @mutex.synchronize do
+      @missing_file_dependencies = deps.dup
     end
   end
 
@@ -980,7 +1304,49 @@ class ::Qa::TapjConduit
   def emit(event)
     @mutex.synchronize do
       case event['type']
+      when 'note'
+        if event['qa:type'] == 'test:begin'
+          @load_tracking.trap_begin
+        end
       when 'test'
+        if file = event['file']
+          absolute_path = File.expand_path(file)
+          missing_files = @missing_file_dependencies[absolute_path] || []
+
+          qa_feature_extensions = [".rb", ".so", ".o", ".dll"]
+          include_absolute_path = ->(absolute_path) do
+            if qa_feature_extensions.any? { |ext| absolute_path.end_with?(ext) }
+              missing_files.push(absolute_path)
+            else
+              qa_feature_extensions.each { |ext| missing_files.push(absolute_path + ext) }
+            end
+          end
+
+          if exception = event['exception']
+            if error_path = exception['load_error_path']
+              if error_path == File.expand_path(error_path) # is absolute (may be load or absolute require)
+                include_absolute_path.(error_path)
+              elsif load_path = exception['load_error_load_path'] # must be non-absolute require
+                load_path.each { |dir| include_absolute_path.(File.expand_path(error_path, dir)) }
+              end
+            end
+          end
+
+          @load_tracking.trap_end([:load, absolute_path])
+
+          loaded_features = @load_tracking.files_loaded_by(absolute_path)
+          new_files, new_digests, file_indices = @loaded_feature_digest_pool.intern(loaded_features)
+          if new_files
+            @upstream.emit({'type' => 'note', 'qa:type' => 'dependency', 'files' => new_files, 'digests' => new_digests})
+          end
+
+          # Augment test events with a list of dependencies
+          event['dependencies'] = {
+            'loaded_indices' => file_indices,
+            'missing' => missing_files
+          }
+        end
+
         @total_count += 1
 
         case event['status']
@@ -1029,12 +1395,12 @@ module ::Qa::ClientSocket
   end
 end
 
-module ::Qa::Warmup; end
+module ::Qa::EagerLoad; end
 
-module ::Qa::Warmup::Autoload
+module ::Qa::EagerLoad::Autoload
   module_function
 
-  def warmup
+  def eager_load!
     if defined?(Rails)
       # Do this earlier, so we can avoid lazy requires and things like
       # ActiveRecord::Base.descendants is fully populated.
@@ -1127,6 +1493,7 @@ class ::Qa::ConservedInstancesSet
   end
 end
 
+module ::Qa::Warmup; end
 module ::Qa::Warmup::RailsActiveRecord
   module_function
 
@@ -1327,13 +1694,15 @@ class ::Qa::ClientOptionParser
   end
 end
 
+require 'set'
 class ::Qa::TestEngine
-  attr_reader :script_errors
-
   def initialize
     @prefork = lambda {}
     @run_tests = lambda {}
-    @script_errors = []
+    @load_error_by_file = {}
+    @script_errors_by_file = Hash.new { |h, k| h[k] = [] }
+
+    @load_tracking = ::Qa::LoadTracking.new
   end
 
   def def_prefork(&b)
@@ -1345,9 +1714,13 @@ class ::Qa::TestEngine
   end
 
   def load_file(file)
-    load(file)
-  rescue ScriptError
-    @script_errors.push($!)
+    absolute_path = File.expand_path(file)
+    @load_tracking.during(nil) { load(absolute_path) }
+  rescue ScriptError, Exception
+    if $!.is_a?(LoadError)
+      @load_error_by_file[absolute_path] = $!
+    end
+    @script_errors_by_file[absolute_path].push($!)
   end
 
   def main(args)
@@ -1376,20 +1749,61 @@ class ::Qa::TestEngine
     qa_trace.start
 
     eval_before_fork = (passthrough['evalBeforeFork'] || '')
-    eval(eval_before_fork) unless eval_before_fork.empty?
+    unless eval_before_fork.empty?
+      @load_tracking.during([:all]) do
+        eval(eval_before_fork)
+      end
+    end
+
+    # Copy globally loaded files for everyone.
+    # globally_loaded_files = @loaded_files_by_file.delete(:all) || {}
+    # $__qa_stderr.puts "globally_loaded_files: #{globally_loaded_files}"
+    # @loaded_files_by_file.each do |file, digests|
+    #   digests.merge!(globally_loaded_files)
+    # end
 
     # Delegate prefork actions.
     (initial_files || []).each do |file|
       load_file(file)
     end
+
+    [
+      @script_errors_by_file,
+      @load_error_by_file,
+    ].each { |h| h.default_proc = nil }
+
+    qa_feature_extensions = [".rb", ".so", ".o", ".dll"]
+    @missing_file_dependencies = {}
+    @load_error_by_file.each do |file, error|
+      missing_files = []
+      include_absolute_path = ->(absolute_path) do
+        if qa_feature_extensions.any? { |ext| absolute_path.end_with?(ext) }
+          missing_files.push(absolute_path)
+        else
+          qa_feature_extensions.each { |ext| missing_files.push(absolute_path + ext) }
+        end
+      end
+
+      error_path = error.instance_variable_get(:@__qa_path) || error.path
+      if error_path == File.expand_path(error_path) # is absolute (may be load or absolute require)
+        include_absolute_path.(error_path)
+      elsif load_path = error.instance_variable_get(:@__qa_load_path) # must be non-absolute require
+        load_path.each { |dir| include_absolute_path.(File.expand_path(error_path, dir)) }
+      end
+
+      @missing_file_dependencies[file] = missing_files
+    end
+
     @prefork.call
 
     conserved = ::Qa::ConservedInstancesSet.new
 
     # Autoload constants.
-    if passthrough['warmup']
-      ::Qa::Warmup::Autoload.warmup
+    if passthrough['eagerLoad']
+      ::Qa::EagerLoad::Autoload.eager_load!
+    end
 
+    if passthrough['warmup']
       # Once we've warmed up, we don't want more SchemaCache instances created. If we see more,
       # then there's something wrong with our warmup (or resume). Add the class to our conserved
       # set.
@@ -1463,34 +1877,44 @@ class ::Qa::TestEngine
 
         seed = opt.seed
         socket = ::Qa::ClientSocket.connect(opt.tapj_sink)
-        tapj_conduit = ::Qa::TapjConduit.new(::Qa::JsonConduit.new(socket))
+        tapj_conduit = ::Qa::TapjConduit.new(@load_tracking, ::Qa::JsonConduit.new(socket))
+        tapj_conduit.missing_file_dependencies = @missing_file_dependencies
 
         run_everything = tests.empty?
 
-        script_errors = nil
-        if tests.empty?
-          script_errors = @script_errors.dup
-        else
-          script_errors = @script_errors.select { |v| tests.delete(v.object_id.to_s) }
+        script_errors_with_file = []
+        @script_errors_by_file.each do |file, script_errors|
+          script_errors.each do |script_error|
+            script_errors_with_file.push([file, script_error])
+          end
         end
 
-        unless script_errors.empty?
-          tapj_conduit.preloaded_test_events = script_errors.map do |script_error|
+        # If we're doing a dry run, then we're going to emit the script errors no matter what.
+        # Otherwise only emit errors that match the given tests.
+        unless opt.dry_run || tests.empty?
+          script_errors_with_file.select! { |(file, script_error)| tests.delete("#{file}:0") }
+        end
+
+        unless script_errors_with_file.empty?
+          preloaded_test_events = []
+          script_errors_with_file.each do |(file, script_error)|
             exception = ::Qa::TapjExceptions.summarize_exception(
                 script_error,
                 script_error.backtrace)
-            {
+
+            preloaded_test_events.push({
               'type'      => 'test',
               'subtype'   => 'script',
               'status'    => 'error',
-              'filter'    => script_error.object_id.to_s,
-              'label'     => exception['backtrace'][0]['file'],
-              'file'      => exception['backtrace'][0]['file'],
-              'line'      => exception['backtrace'][0]['line'],
+              'filter'    => "#{file}:0",
+              'label'     => file,
+              'file'      => file,
+              'line'      => 0,
               'time'      => 0,
               'exception' => exception
-            }
+            })
           end
+          tapj_conduit.preloaded_test_events = preloaded_test_events
         end
 
         trace_events.each do |e|

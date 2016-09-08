@@ -1,11 +1,14 @@
 package run
 
 import (
-	"encoding/json"
+	"crypto/rand"
 	"flag"
+	"fmt"
+	"math/big"
 	"path/filepath"
 	"qa/cmd"
-	"strconv"
+	"qa/run"
+	"qa/runner"
 )
 
 type runFlags struct {
@@ -15,6 +18,10 @@ type runFlags struct {
 	chdir        *string
 	suiteCoderef *string
 	suiteLabel   *string
+	watch        *bool
+
+	memprofile *string
+	heapdump   *string
 }
 
 func DefineFlags(flags *flag.FlagSet) *runFlags {
@@ -24,13 +31,15 @@ func DefineFlags(flags *flag.FlagSet) *runFlags {
 		chdir:          flags.String("chdir", "", "Change to the given directory"),
 		suiteCoderef:   flags.String("suite-coderef", "", "Set coderef for suite (useful for flakiness detection)"),
 		suiteLabel:     flags.String("suite-label", "", "Set label for suite (useful for flakiness detection)"),
+		watch:          flags.Bool("watch", false, "Watch test files for changes and continuously re-run tests"),
+		memprofile:     flags.String("memprofile", "", "write memory profile to `file`"),
+		heapdump:       flags.String("heapdump", "", "write heap dump to `file`"),
 	}
 }
 
-func (f *runFlags) NewEnv(env *cmd.Env, runnerSpecs []string) (*Env, error) {
-	executionFlags := *f.executionFlags
-	outputFlags := *f.outputFlags
-	e := *env
+func (f *runFlags) cloneAndAdjustEnv(env *cmd.Env) *cmd.Env {
+	e := new(cmd.Env)
+	*e = *env
 
 	if *f.chdir != "" {
 		if filepath.IsAbs(*f.chdir) {
@@ -40,16 +49,61 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerSpecs []string) (*Env, error) {
 		}
 	}
 
+	return e
+}
+
+func (f *runFlags) Watch() bool {
+	return *f.watch
+}
+
+func (f *runFlags) SetShowSnails(showSnails bool) {
+	*f.outputFlags.showSnails = showSnails
+}
+
+func (f *runFlags) SetShowUpdatingSummary(showUpdatingSummary bool) {
+	*f.outputFlags.showUpdatingSummary = showUpdatingSummary
+}
+
+func (f *runFlags) ApplyImpliedDefaults() {
+	executionFlags := f.executionFlags
+	outputFlags := f.outputFlags
+
 	if *outputFlags.saveStacktraces != "" ||
 		*outputFlags.saveFlamegraph != "" ||
 		*outputFlags.saveIcegraph != "" {
 		*executionFlags.sampleStack = true
 	}
 
-	svgTitleArgs, _ := json.Marshal(runnerSpecs)
-	svgTitleSuffix := " — jobs = " + strconv.Itoa(*executionFlags.jobs) + ", runnerSpecs = " + string(svgTitleArgs)
+	if *executionFlags.seed == -1 {
+		bigSeed, err := rand.Int(rand.Reader, big.NewInt(65535))
+		if err != nil {
+			panic(err)
+		}
+		*executionFlags.seed = int(bigSeed.Int64())
+	}
 
-	visitor, err := outputFlags.newVisitor(&e, *executionFlags.jobs, string(svgTitleSuffix))
+	if *f.watch {
+		f.SetShowSnails(false)
+		f.SetShowUpdatingSummary(false)
+	}
+}
+
+func (f *runFlags) NewRunnerConfig(env *cmd.Env, runnerName string, patterns []string) runner.Config {
+	return f.executionFlags.NewRunnerConfig(f.cloneAndAdjustEnv(env), runnerName, patterns)
+}
+
+func (f *runFlags) ParseRunnerConfigs(env *cmd.Env, runnerSpecs []string) []runner.Config {
+	return f.executionFlags.ParseRunnerConfigs(f.cloneAndAdjustEnv(env), runnerSpecs)
+}
+
+func (f *runFlags) NewEnv(env *cmd.Env, runnerConfigs []runner.Config) (*run.Env, error) {
+	executionFlags := *f.executionFlags
+	outputFlags := *f.outputFlags
+
+	svgTitleSuffix := fmt.Sprintf(" — jobs = %d, runnerSpecs = %#v", *executionFlags.jobs, runnerConfigs)
+
+	e := f.cloneAndAdjustEnv(env)
+	visitor, err := outputFlags.newVisitor(e, *executionFlags.jobs, svgTitleSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -59,12 +113,14 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerSpecs []string) (*Env, error) {
 		return nil, err
 	}
 
-	return &Env{
+	return &run.Env{
 		Seed:          *executionFlags.seed,
 		SuiteLabel:    *f.suiteLabel,
 		SuiteCoderef:  *f.suiteCoderef,
+		Memprofile:    *f.memprofile,
+		Heapdump:      *f.heapdump,
 		WorkerEnvs:    executionFlags.WorkerEnvs(),
-		RunnerConfigs: executionFlags.RunnerConfigs(&e, runnerSpecs),
+		RunnerConfigs: runnerConfigs,
 		Visitor:       visitor,
 		Server:        srv,
 	}, nil

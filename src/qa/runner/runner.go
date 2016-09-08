@@ -2,21 +2,24 @@ package runner
 
 import (
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
+	"qa/glob"
 	"qa/tapjio"
 	"sort"
-	"strings"
 	"sync"
-
-	"github.com/mattn/go-zglob"
 )
 
 //go:generate go-bindata -o $GOGENPATH/qa/runner/assets/bindata.go -pkg assets -prefix ../runner-assets/ ../runner-assets/...
 
+type TestDependencyEntry struct {
+	Label        string
+	File         tapjio.FilePath
+	Filter       tapjio.TestFilter
+	Dependencies tapjio.TestDependencies
+}
+
 type TestRunner interface {
 	Run(env map[string]string, visitor tapjio.Visitor) error
+	Dependencies() []TestDependencyEntry
 	TestCount() int
 }
 
@@ -50,7 +53,7 @@ type FileGlob struct {
 }
 
 func NewFileGlob(dir string, patterns []string) *FileGlob {
-	return &FileGlob{dir: dir, patterns: patterns}
+	return &FileGlob{dir: dir, patterns: append([]string{}, patterns...)}
 }
 
 type FileLister interface {
@@ -69,29 +72,14 @@ func (f *FileGlob) Patterns() []string {
 
 func (f *FileGlob) ListFiles() ([]string, error) {
 	var files []string
-	dir := f.dir
 	for _, pattern := range f.patterns {
-		// Make glob absolute, using dir
-		relative := !filepath.IsAbs(pattern)
-		if relative && dir != "" {
-			pattern = filepath.Join(dir, pattern)
-		}
-
 		// Expand glob
-		globFiles, err := zglob.Glob(pattern)
+		globFiles, err := glob.Glob(f.dir, pattern)
 		if err != nil {
 			return files, err
 		}
 
-		// Strip prefix from glob matches if needed.
-		if relative && dir != "" {
-			trimPrefix := fmt.Sprintf("%s%c", dir, os.PathSeparator)
-			for _, file := range globFiles {
-				files = append(files, strings.TrimPrefix(file, trimPrefix))
-			}
-		} else {
-			files = append(files, globFiles...)
-		}
+		files = append(files, globFiles...)
 	}
 
 	return files, nil
@@ -114,6 +102,7 @@ type Config struct {
 	Seed              int
 	SquashPolicy      SquashPolicy
 	TraceProbes       []string
+	Filters           []tapjio.TestFilter
 }
 
 func (f *Config) Files() ([]string, error) {
@@ -127,8 +116,8 @@ type Context interface {
 
 type eventUnion struct {
 	trace  *tapjio.TraceEvent
-	begin  *tapjio.TestStartedEvent
-	finish *tapjio.TestEvent
+	begin  *tapjio.TestBeginEvent
+	finish *tapjio.TestFinishEvent
 	error  error
 }
 
@@ -179,11 +168,11 @@ func RunAll(
 				err := testRunner.Run(
 					env,
 					&tapjio.DecodingCallbacks{
-						OnTestBegin: func(test tapjio.TestStartedEvent) error {
+						OnTestBegin: func(test tapjio.TestBeginEvent) error {
 							eventChan <- eventUnion{nil, &test, nil, nil}
 							return nil
 						},
-						OnTest: func(test tapjio.TestEvent) error {
+						OnTestFinish: func(test tapjio.TestFinishEvent) error {
 							eventChan <- eventUnion{nil, nil, &test, nil}
 							return nil
 						},
@@ -216,7 +205,7 @@ func RunAll(
 
 		begin := eventUnion.begin
 		if begin != nil {
-			err = visitor.TestStarted(*begin)
+			err = visitor.TestBegin(*begin)
 			if err != nil {
 				return
 			}
@@ -226,7 +215,7 @@ func RunAll(
 		test := eventUnion.finish
 
 		if eventUnion.error != nil {
-			test = &tapjio.TestEvent{
+			test = &tapjio.TestFinishEvent{
 				Type:   "test",
 				Time:   0,
 				Label:  "<internal error: " + eventUnion.error.Error() + ">",
@@ -239,7 +228,7 @@ func RunAll(
 
 		tally.Increment(test.Status)
 
-		err = visitor.TestFinished(*test)
+		err = visitor.TestFinish(*test)
 		if err != nil {
 			return
 		}

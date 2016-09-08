@@ -1,0 +1,70 @@
+# qa minitest
+
+# Qa is a test runner that runs your existing tests
+# quickly and intelligently. It does this using
+# parallelism, dependency analysis, and file watching.
+#
+# Qa works with your existing rspec, minitest, or
+# test-unit tests.
+#
+
+# We'll be using the ruby-mime-types test suite to
+# demonstrate running tests in parallel with qa.
+#
+git remote get-url origin; git reset --hard aa499d1; tree ./test
+
+#
+# First fix a parallelism bug in the cache tests.
+git apply ../patches/fix-cache-test-parallelism.patch
+git diff -U2; git add --update
+
+#
+# For comparison, run tests using the existing test runner.
+time bundle exec sh -c 'rake test >/dev/null 2>&1'
+
+#
+# Now use qa to run the same tests, in parallel.
+time bundle exec qa minitest -quiet
+
+#
+# Using multiple cores makes a big difference!
+
+#
+# Qa does more than just run tests in parallel though. It
+# also formats output from individual tests for easy reading.
+
+#
+# Let's apply a patch that exercises these features.
+git apply ../patches/add-stdout-noise.patch
+
+#
+bundle exec qa minitest
+
+#
+# Qa also detects slow tests. Look above for the
+# 🐌  to see the slowest tests and how they compare.
+
+#
+# The overall time is about the same as before, but 2+ seconds
+# to run just one test?
+
+#
+# Let's look at the patch we applied.
+
+git diff -U2
+
+#
+# That sleep doesn't belong there!
+git checkout test/test_mime_types_loader.rb
+
+#
+bundle exec qa minitest
+
+#
+# We still have more snails to hunt, but that's better!
+
+#
+# Learn more about how qa can help you write better code, faster:
+# https://github.com/ajbouh/qa
+#
+# Thanks for watching and happy hacking!

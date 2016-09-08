@@ -17,6 +17,8 @@ type Pretty struct {
 	ElideQuietPass      bool
 	ElideQuietOmit      bool
 	ShowUpdatingSummary bool
+	ShowSnails          bool
+	ShowIndividualTests bool
 
 	writer        io.Writer
 	jobs          int
@@ -28,29 +30,32 @@ type Pretty struct {
 	timeCop       *analysis.TimeCop
 	tally         *tapjio.ResultTally
 
-	pending map[string]string
+	mostRecentTestPrintedSpacingNewline bool
 
-	boldYellow func(a ...interface{}) string
-	cyan       func(a ...interface{}) string
-	green      func(a ...interface{}) string
-	red        func(a ...interface{}) string
-	magenta    func(a ...interface{}) string
-	bold       func(a ...interface{}) string
+	pending map[tapjio.TestFilter]string
+
+	boldYellow  func(a ...interface{}) string
+	yellow      func(a ...interface{}) string
+	cyan        func(a ...interface{}) string
+	green       func(a ...interface{}) string
+	red         func(a ...interface{}) string
+	magenta     func(a ...interface{}) string
+	boldMagenta func(a ...interface{}) string
+	bold        func(a ...interface{}) string
 }
 
 func NewPretty(writer io.Writer, jobs int) *Pretty {
 	return &Pretty{
-		writer:     writer,
-		jobs:       jobs,
-		pending:    make(map[string]string),
-		timeCop:    &analysis.TimeCop{MaxResults: 10},
-		tally:      &tapjio.ResultTally{},
-		boldYellow: color.New(color.Bold, color.FgYellow).SprintFunc(),
-		cyan:       color.New(color.FgCyan).SprintFunc(),
-		green:      color.New(color.FgGreen).SprintFunc(),
-		red:        color.New(color.FgRed).SprintFunc(),
-		magenta:    color.New(color.FgMagenta).SprintFunc(),
-		bold:       color.New(color.Bold).SprintFunc(),
+		writer:      writer,
+		jobs:        jobs,
+		boldYellow:  color.New(color.Bold, color.FgYellow).SprintFunc(),
+		yellow:      color.New(color.FgYellow).SprintFunc(),
+		cyan:        color.New(color.FgCyan).SprintFunc(),
+		green:       color.New(color.FgGreen).SprintFunc(),
+		red:         color.New(color.FgRed).SprintFunc(),
+		magenta:     color.New(color.FgMagenta).SprintFunc(),
+		boldMagenta: color.New(color.Bold, color.FgMagenta).SprintFunc(),
+		bold:        color.New(color.Bold).SprintFunc(),
 	}
 }
 
@@ -88,15 +93,36 @@ func (self *Pretty) TraceEvent(trace tapjio.TraceEvent) error {
 	return nil
 }
 
-func (self *Pretty) SuiteStarted(suite tapjio.SuiteEvent) error {
+func (self *Pretty) SuiteBegin(suite tapjio.SuiteBeginEvent) error {
+	self.pending = make(map[tapjio.TestFilter]string)
+	self.timeCop = &analysis.TimeCop{MaxResults: 10}
+	self.tally = &tapjio.ResultTally{}
+
 	self.totalTests = suite.Count
 	self.seed = suite.Seed
 	self.startTime = time.Now()
-	fmt.Fprintf(self.writer, "Will run %d tests using %d %s and seed %d. Will hide names of passing tests lacking output.\n\n",
+
+	omissions := []string{}
+	if self.ElideQuietPass {
+		omissions = append(omissions, "passing")
+	}
+
+	if self.ElideQuietOmit {
+		omissions = append(omissions, "omitted")
+	}
+
+	omissionsDesc := ""
+	if len(omissions) > 0 {
+		omissionsDesc = fmt.Sprintf(" Will only show %s tests with output.",
+			strings.Join(omissions, "/"))
+	}
+
+	fmt.Fprintf(self.writer, "Will run %d tests using %d %s and seed %d.%s..\n",
 		self.totalTests,
 		self.jobs,
 		maybePlural(self.jobs, "job", "jobs"),
-		self.seed)
+		self.seed,
+		omissionsDesc)
 
 	self.writeSummary()
 	return nil
@@ -107,10 +133,15 @@ func (self *Pretty) clearSummary() {
 		return
 	}
 
-	n := 2 + len(self.pending)
-	for i := 0; i < n; i++ {
-		// Move up, move to beginning of line, clear line
-		fmt.Fprintf(self.writer, "\033[1A\r\033[2K")
+	if self.ShowIndividualTests {
+		n := 1 + len(self.pending)
+		for i := 0; i < n; i++ {
+			// Clear line, beginning of line, move up, clear line
+			fmt.Fprintf(self.writer, "\033[2K\r\033[1A\033[2K")
+		}
+	} else {
+		// Clear line, beginning of line
+		fmt.Fprintf(self.writer, "\033[2K\r")
 	}
 }
 
@@ -128,21 +159,29 @@ func (self *Pretty) writeSummary() {
 		tallySummary = tallySummary + ", with"
 	}
 
-	fmt.Fprintf(self.writer, "\nRan %d%% in %v (%v of job time)%s%s %d remaining and %d running:\n",
+	lineSuffix := ""
+	if self.ShowIndividualTests {
+		lineSuffix = ":\n"
+	}
+
+	fmt.Fprintf(self.writer, "Ran %d%% in %v (%v of job time)%s%s %d remaining and %d running%s",
 		int(float64(self.tally.Total)/float64(self.totalTests)*100.0),
 		round(time.Since(self.startTime), time.Millisecond),
 		millisDuration(self.totalTestTime),
 		tallySummaryPrefix,
 		tallySummary,
 		self.totalTests-self.tally.Total-numPending,
-		numPending)
+		numPending,
+		lineSuffix)
 
-	for _, label := range self.pending {
-		fmt.Fprintf(self.writer, "  %s\n", self.bold(label))
+	if self.ShowIndividualTests {
+		for _, label := range self.pending {
+			fmt.Fprintf(self.writer, "  %s\n", self.bold(label))
+		}
 	}
 }
 
-func (self *Pretty) TestStarted(event tapjio.TestStartedEvent) error {
+func (self *Pretty) TestBegin(event tapjio.TestBeginEvent) error {
 	self.clearSummary()
 	self.pending[event.Filter] = tapjio.TestLabel(event.Label, event.Cases)
 	self.writeSummary()
@@ -150,8 +189,8 @@ func (self *Pretty) TestStarted(event tapjio.TestStartedEvent) error {
 	return nil
 }
 
-func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
-	self.timeCop.TestFinished(test)
+func (self *Pretty) TestFinish(test tapjio.TestFinishEvent) error {
+	self.timeCop.TestFinish(test)
 	self.tally.Increment(test.Status)
 
 	self.totalTestTime += test.Time
@@ -161,6 +200,10 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 
 	delete(self.pending, test.Filter)
 	defer self.writeSummary()
+
+	if !self.ShowIndividualTests {
+		return nil
+	}
 
 	if ((self.ElideQuietPass && test.Status == tapjio.Pass) ||
 		(self.ElideQuietOmit && test.Status == tapjio.Omit)) &&
@@ -175,7 +218,7 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 	case tapjio.Fail:
 		status = self.red("✖") // " FAIL"
 	case tapjio.Error:
-		status = self.magenta("‼") // "ERROR"
+		status = self.boldMagenta("!") // "ERROR"
 	case tapjio.Omit:
 		status = self.cyan("Ø") // " OMIT"
 	case tapjio.Todo:
@@ -267,6 +310,13 @@ func (self *Pretty) TestFinished(test tapjio.TestEvent) error {
 		fmt.Fprintf(self.writer, "   %s\n%s%s", "STDERR", indent(test.Stderr, 3), endl)
 	}
 
+	if test.Stdout != "" || test.Stderr != "" {
+		self.mostRecentTestPrintedSpacingNewline = true
+		fmt.Fprintf(self.writer, "\n")
+	} else {
+		self.mostRecentTestPrintedSpacingNewline = false
+	}
+
 	return nil
 }
 
@@ -317,42 +367,53 @@ func millisDuration(seconds float64) time.Duration {
 	return time.Duration(seconds*1000) * time.Millisecond
 }
 
-func (self *Pretty) SuiteFinished(final tapjio.FinalEvent) error {
-	self.timeCop.SuiteFinished(final)
+func (self *Pretty) SuiteFinish(final tapjio.SuiteFinishEvent) error {
+	self.timeCop.SuiteFinish(final)
 	self.clearSummary()
 
 	counts := final.Counts
 
-	fmt.Fprintf(self.writer, "\n🏁  Ran %d tests in %v (%v of job time): %s.\n",
+	// If there are errors/fails don't show any SLOW PASSes
+	if self.ShowSnails {
+		numSlowOutcomes := len(self.timeCop.SlowPassingOutcomes)
+		if self.timeCop.Passed() && numSlowOutcomes > 0 {
+
+			if !self.mostRecentTestPrintedSpacingNewline {
+				fmt.Fprintf(self.writer, "\n")
+			}
+
+			// Reverse the outcome order so the slowest is at the bottom.
+			slowPassingOutcomes := make([]analysis.Outcome, numSlowOutcomes)
+			for ix, outcome := range self.timeCop.SlowPassingOutcomes {
+				slowPassingOutcomes[numSlowOutcomes - (ix + 1)] = outcome
+			}
+
+			for _, outcome := range slowPassingOutcomes {
+				fmt.Fprintf(self.writer, "🐌  %-59s %v\n",
+					outcome.Label,
+					self.yellow(millisDuration(outcome.Duration)))
+			}
+
+			// NOTE(adamb) Job time only == real time if jobs == 1. This is because
+			//     jobs execute in parallel, thus 2 seconds of job time might only
+			//     take 1 second of real time if split equally between two jobs.
+			fmt.Fprintf(self.writer,
+				self.boldYellow("\nThe %d slowest %s above took %v or %.f%% of job time (the %d %s %v)\n\n"),
+				numSlowOutcomes,
+				maybePlural(numSlowOutcomes, "test", "tests"),
+				millisDuration(self.timeCop.TotalSlowPassingDuration),
+				self.timeCop.TotalSlowPassingDuration/self.timeCop.TotalDuration*100,
+				len(self.timeCop.FastPassingOutcomes),
+				maybePlural(len(self.timeCop.FastPassingOutcomes), "other took", "others each took ≤"),
+				millisDuration(self.timeCop.SlowestFastPassingDuration))
+		}
+	}
+
+	fmt.Fprintf(self.writer, "🏁  Ran %d tests in %v (%v of job time): %s.\n",
 		counts.Total,
 		millisDuration(final.Time),
 		millisDuration(self.timeCop.TotalDuration),
 		self.summarizeTally(*counts))
-
-	// If there are errors/fails don't show any SLOW PASSes
-	if self.timeCop.Passed() && len(self.timeCop.SlowPassingOutcomes) > 0 {
-		fmt.Fprintf(self.writer, "\n")
-
-		// NOTE(adamb) Job time only == real time if jobs == 1. This is because
-		//     jobs execute in parallel, thus 2 seconds of job time might only
-		//     take 1 second of real time if split equally between two jobs.
-		fmt.Fprintf(self.writer,
-			self.boldYellow("The %d slowest %s took %v or %.f%% of job time (the %d %s %v):\n"),
-			len(self.timeCop.SlowPassingOutcomes),
-			maybePlural(len(self.timeCop.SlowPassingOutcomes), "test", "tests"),
-			millisDuration(self.timeCop.TotalSlowPassingDuration),
-			self.timeCop.TotalSlowPassingDuration/self.timeCop.TotalDuration*100,
-			len(self.timeCop.FastPassingOutcomes),
-			maybePlural(len(self.timeCop.FastPassingOutcomes), "other took", "others each took ≤"),
-			millisDuration(self.timeCop.SlowestFastPassingDuration))
-
-		slowPassingOutcomes := self.timeCop.SlowPassingOutcomes
-		for _, outcome := range slowPassingOutcomes {
-			fmt.Fprintf(self.writer, "🐌  %-59s %v\n",
-				self.boldYellow(outcome.Label),
-				millisDuration(outcome.Duration))
-		}
-	}
 
 	return nil
 }

@@ -21,12 +21,16 @@ type registerCallbackEntry struct {
 }
 
 type registerChannelEntry struct {
-	token string
-	ch    chan interface{}
+	token   string
+	ch      chan interface{}
+	errChan chan error
 }
 
 type Server struct {
-	quitChan      chan struct{}
+	quitChan    chan struct{}
+	isQuit      bool
+	isQuitMutex *sync.Mutex
+
 	listenAddress string
 	listener      net.Listener
 
@@ -35,7 +39,7 @@ type Server struct {
 	visitorEntries       map[string]registerCallbackEntry
 
 	registerChannelChan chan registerChannelEntry
-	exposedChannels     map[string]chan interface{}
+	exposedChannels     map[string]registerChannelEntry
 
 	isRunningMutex *sync.Mutex
 	isRunning      bool
@@ -48,32 +52,47 @@ type acceptConnTokenEvent struct {
 }
 
 func (s *Server) Close() error {
+	m := s.isQuitMutex
+	m.Lock()
+	defer m.Unlock()
+	if s.isQuit {
+		return nil
+	}
+
 	close(s.quitChan)
-	return s.listener.Close()
+	err := s.listener.Close()
+	s.isQuit = true
+
+	return err
 }
 
 func Listen(netProto, listenAddress string) (*Server, error) {
-	fmt.Fprintln(os.Stderr, "Listening on", netProto, listenAddress)
+	// fmt.Fprintln(os.Stderr, "Listening on", netProto, listenAddress)
 	listener, err := net.Listen(netProto, listenAddress)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error ", err)
 		return nil, err
 	}
 
-	return &Server{
+	srv := &Server{
 		quitChan:             make(chan struct{}),
-		isRunning:            false,
+		isQuit:               false,
+		isQuitMutex:          &sync.Mutex{},
+		isRunning:            true,
 		isRunningMutex:       &sync.Mutex{},
 		listener:             listener,
 		cancelChan:           make(chan string),
 		registerCallbackChan: make(chan registerCallbackEntry),
 		visitorEntries:       make(map[string]registerCallbackEntry),
-		exposedChannels:      make(map[string]chan interface{}),
+		exposedChannels:      make(map[string]registerChannelEntry),
 		registerChannelChan:  make(chan registerChannelEntry),
-	}, nil
+	}
+	go srv.run()
+
+	return srv, nil
 }
 
-func (s *Server) Run() error {
+func (s *Server) run() error {
 	// Should be closed by accept goroutine
 	acceptConnChan := make(chan net.Conn)
 
@@ -131,6 +150,15 @@ func (s *Server) Run() error {
 
 		go func() {
 			reason := errors.New("No longer running")
+
+			for entry := range s.registerChannelChan {
+				entry.errChan <- reason
+				close(entry.errChan)
+			}
+		}()
+
+		go func() {
+			reason := errors.New("No longer running")
 			// Drain remaining visitor registrations
 			for entry := range s.registerCallbackChan {
 				err := entry.visitor.End(reason)
@@ -175,41 +203,58 @@ func (s *Server) Run() error {
 		}()
 	}()
 
-	isRunningMutex.Lock()
-	s.isRunning = true
-	isRunningMutex.Unlock()
+	errChanWg.Add(1)
+	defer errChanWg.Done()
+
+	acceptTokenWg.Add(1)
+	defer acceptTokenWg.Done()
 
 	for {
 		select {
-		case err := <-errChan:
+		case err, k := <-errChan:
+			if !k {
+				fmt.Fprintf(os.Stderr, "errChan unexpectedly closed: %#v\n", errChan)
+			}
 			fmt.Fprintf(os.Stderr, "Fatal error in server: %v\n", err)
 			s.listener.Close()
 			return err
-		case address := <-s.cancelChan:
-			entry, ok := s.visitorEntries[address]
+		case address, k := <-s.cancelChan:
+			if !k {
+				fmt.Fprintf(os.Stderr, "s.cancelChan unexpectedly closed: %#v\n", s.cancelChan)
+			}
+			visitorEntry, ok := s.visitorEntries[address]
 			if ok {
 				delete(s.visitorEntries, address)
 				reason := errors.New("Canceled")
-				err := entry.visitor.End(reason)
+				err := visitorEntry.visitor.End(reason)
 				if err != nil {
-					entry.errChan <- err
+					visitorEntry.errChan <- err
 				} else {
-					entry.errChan <- reason
+					visitorEntry.errChan <- reason
 				}
-				close(entry.errChan)
+				close(visitorEntry.errChan)
 			}
 
-			_, ok = s.exposedChannels[address]
+			exposedEntry, ok := s.exposedChannels[address]
 			if ok {
+				reason := errors.New("Canceled")
 				delete(s.exposedChannels, address)
+				exposedEntry.errChan <- reason
+				close(exposedEntry.errChan)
 			}
-		case entry := <-s.registerCallbackChan:
+		case entry, k := <-s.registerCallbackChan:
+			if !k {
+				fmt.Fprintf(os.Stderr, "s.registerCallbackChan unexpectedly closed: %#v\n", s.registerCallbackChan)
+			}
 			s.visitorEntries[entry.token] = entry
-		case entry := <-s.registerChannelChan:
-			s.exposedChannels[entry.token] = entry.ch
+		case entry, k := <-s.registerChannelChan:
+			if !k {
+				fmt.Fprintf(os.Stderr, "s.registerChannelChan unexpectedly closed: %#v\n", s.registerChannelChan)
+			}
+			s.exposedChannels[entry.token] = entry
 		case conn, ok := <-acceptConnChan:
 			if !ok {
-				break
+				return nil
 			}
 			acceptTokenWg.Add(1)
 			errChanWg.Add(1)
@@ -227,10 +272,13 @@ func (s *Server) Run() error {
 				token = strings.Trim(token, "\n")
 				acceptTokenChan <- acceptConnTokenEvent{token, conn, bufReader}
 			}(conn)
-		case accept := <-acceptTokenChan:
+		case accept, k := <-acceptTokenChan:
+			if !k {
+				fmt.Fprintf(os.Stderr, "acceptTokenChan unexpectedly closed: %#v\n", acceptTokenChan)
+			}
 			// Token is one-time use.
 			token := accept.token
-			entry, ok := s.visitorEntries[token]
+			visitorEntry, ok := s.visitorEntries[token]
 			if ok {
 				delete(s.visitorEntries, token)
 
@@ -241,28 +289,24 @@ func (s *Server) Run() error {
 					if err != nil {
 						entry.errChan <- err
 					}
-				}(json.NewDecoder(accept.reader), accept.conn, entry)
+				}(json.NewDecoder(accept.reader), accept.conn, visitorEntry)
 				break
 			}
 
-			exposed, ok := s.exposedChannels[token]
+			exposedEntry, ok := s.exposedChannels[token]
 			if ok {
 				delete(s.exposedChannels, token)
-				errChanWg.Add(1)
-				go func() {
-					defer errChanWg.Done()
-					conn := accept.conn
+
+				go func(encoder *json.Encoder, conn net.Conn, entry registerChannelEntry) {
+					defer close(entry.errChan)
 					defer conn.Close()
-
-					encoder := json.NewEncoder(conn)
-
-					for value := range exposed {
+					for value := range entry.ch {
 						if err := encoder.Encode(value); err != nil {
-							errChan <- err
+							entry.errChan <- err
 							return
 						}
 					}
-				}()
+				}(json.NewEncoder(accept.conn), accept.conn, exposedEntry)
 				break
 			}
 		}
@@ -308,13 +352,13 @@ func (s *Server) Decode(callbacks tapjio.Visitor) (string, chan error, error) {
 		address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
 		return address, errChan, nil
 	} else {
-		return "", nil, errors.New("Server is not running")
+		return "", nil, fmt.Errorf("Server is not running; can't decode to %#v", callbacks)
 	}
 }
 
 // Decode returns a server address that can be used by a test runner to
 // stream tapj results.
-func (s *Server) ExposeChannel(ch chan interface{}) (string, error) {
+func (s *Server) ExposeChannel(ch chan interface{}) (string, chan error, error) {
 	// TODO(adamb) Fire off error handlers on callbacks if server shuts down without
 	//    response.
 
@@ -324,10 +368,11 @@ func (s *Server) ExposeChannel(ch chan interface{}) (string, error) {
 	if s.isRunning {
 		// Make new token
 		token := randomToken(16)
-		s.registerChannelChan <- registerChannelEntry{token, ch}
+		errChan := make(chan error, 1)
+		s.registerChannelChan <- registerChannelEntry{token, ch, errChan}
 		address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
-		return address, nil
+		return address, errChan, nil
 	} else {
-		return "", errors.New("Server is not running")
+		return "", nil, fmt.Errorf("Server is not running; can't expose %#v", ch)
 	}
 }

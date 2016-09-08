@@ -1,9 +1,18 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
 )
+
+type QuietError struct {
+	Status int
+}
+
+func (e QuietError) Error() string {
+	return fmt.Sprintf("exit code: %d", e.Status)
+}
 
 type Env struct {
 	Vars   map[string]string

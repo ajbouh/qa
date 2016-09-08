@@ -1,0 +1,25 @@
+diff --git a/test/test_mime_types_lazy.rb b/test/test_mime_types_lazy.rb
+index 3a3263e..91c261e 100644
+--- a/test/test_mime_types_lazy.rb
++++ b/test/test_mime_types_lazy.rb
+@@ -24,6 +24,8 @@ describe MIME::Types, 'lazy loading' do
+     end
+ 
+     it 'is nil when RUBY_MIME_TYPES_LAZY_LOAD is unset' do
++      prev = ENV['RUBY_MIME_TYPES_LAZY_LOAD']
++      puts "$RUBY_MIME_TYPES_LAZY_LOAD was #{prev.inspect}"
+       ENV['RUBY_MIME_TYPES_LAZY_LOAD'] = nil
+       assert_equal nil, MIME::Types.send(:lazy_load?)
+     end
+diff --git a/test/test_mime_types_loader.rb b/test/test_mime_types_loader.rb
+index d78df11..e441d87 100644
+--- a/test/test_mime_types_loader.rb
++++ b/test/test_mime_types_loader.rb
+@@ -27,6 +27,7 @@ describe MIME::Types::Loader do
+   end
+ 
+   it 'loads JSON files correctly' do
++    $stderr.puts ".#{sleep 2}.."
+     assert_correctly_loaded @loader.load_json
+   end
+ end

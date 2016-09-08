@@ -65,8 +65,10 @@ type outputFlags struct {
 	savePalette         *string
 	format              *string
 	showUpdatingSummary *bool
+	showIndividualTests *bool
 	elidePass           *bool
 	elideOmit           *bool
+	showSnails          *bool
 }
 
 func defineOutputFlags(flags *flag.FlagSet) *outputFlags {
@@ -81,9 +83,11 @@ func defineOutputFlags(flags *flag.FlagSet) *outputFlags {
 		saveIcegraph:        flags.String("save-icegraph", "", "Path to save icegraph SVG, implies -sample-stack"),
 		savePalette:         flags.String("save-palette", "palette.map", "Path to save (flame|ice)graph palette"),
 		format:              flags.String("format", "pretty", "Set output format"),
-		showUpdatingSummary: flags.Bool("pretty-overwrite", true, "Pretty reporter shows live updating summary"),
+		showUpdatingSummary: flags.Bool("pretty-overwrite", true, "Pretty reporter shows live updating summary. Forces -pretty-quite-pass=false, -pretty-quiet-omit=false"),
+		showIndividualTests: flags.Bool("pretty-show-individual-tests", true, "Pretty reporter shows output for individual tests"),
 		elidePass:           flags.Bool("pretty-quiet-pass", true, "Pretty reporter elides passing tests without (std)output"),
 		elideOmit:           flags.Bool("pretty-quiet-omit", true, "Pretty reporter elides omitted tests without (std)output"),
+		showSnails:          flags.Bool("pretty-show-snails", true, "Pretty reporter shows tests dramatically slower than others"),
 	}
 }
 
@@ -118,9 +122,20 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 			visitors = append(visitors, tapjio.NewTapjEmitter(env.Stdout))
 		case "pretty":
 			pretty := reporting.NewPretty(env.Stdout, jobs)
+			pretty.ShowIndividualTests = *f.showIndividualTests
+			if pretty.ShowIndividualTests {
+				pretty.ShowSnails = *f.showSnails
+			} else {
+				pretty.ShowSnails = false
+			}
 			pretty.ShowUpdatingSummary = *f.showUpdatingSummary
-			pretty.ElideQuietPass = *f.elidePass
-			pretty.ElideQuietOmit = *f.elideOmit
+			if pretty.ShowUpdatingSummary {
+				pretty.ElideQuietPass = *f.elidePass
+				pretty.ElideQuietOmit = *f.elideOmit
+			} else {
+				pretty.ElideQuietPass = false
+				pretty.ElideQuietOmit = false
+			}
 			visitors = append(visitors, pretty)
 		default:
 			return nil, errors.New(fmt.Sprintf("Unknown format: %v", *f.format))
@@ -178,7 +193,7 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 
 	if saveFlamegraph != "" {
 		visitors = append(visitors, &tapjio.DecodingCallbacks{
-			OnFinal: func(final tapjio.FinalEvent) error {
+			OnSuiteFinish: func(final tapjio.SuiteFinishEvent) error {
 				options := []string{
 					"--title", "Flame Graph" + svgTitleSuffix,
 					"--minwidth=2",
@@ -216,7 +231,7 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 
 	if saveIcegraph != "" {
 		visitors = append(visitors, &tapjio.DecodingCallbacks{
-			OnFinal: func(final tapjio.FinalEvent) error {
+			OnSuiteFinish: func(final tapjio.SuiteFinishEvent) error {
 				options := []string{
 					"--title", "Icicle Graph" + svgTitleSuffix,
 					"--minwidth=2",

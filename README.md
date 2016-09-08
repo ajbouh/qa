@@ -2,25 +2,27 @@
 
 QA is a lightweight tool for running your tests *fast*.
 
-For years, the software testing ecosystem has lagged behind other parts of the software development pipeline. Advances in type systems, compiler technology, and prototyping environments (to name a few) have helped make software engineers much more productive. QA is an effort to make similar strides for automated testing tools.
+[![qa minitest asciicast](https://asciinema.org/a/d94fig03bbkmnzdy4mtk87ns4.png)](https://asciinema.org/a/d94fig03bbkmnzdy4mtk87ns4)
+
+Advances in type systems, compiler technology, and prototyping environments (to name a few) have helped make many software engineering activities more productive. QA is an effort to make similar strides for automated testing tools.
 
 ## What can QA help me do today?
 
-1. Run your tests faster. Run `qa run <type>` in your project directory and watch your test results scream by as they run in parallel. QA provides a beautiful, easy to understand report. No Rakefile necessary!
+1. Run your tests faster. Run `qa rspec`, `qa minitest`, or `qa test-unit` in your project directory and watch your test results scream by as they run in parallel. QA provides a beautiful, easy to understand report. No Rakefile necessary!
 
-2. See which tests are slowing down your testrun. QA highlights tests that are dramatically slower than the average test duration. Look for the 🐌 at the end of successful testrun!
+2. See which tests are slowing you down. QA highlights tests that are dramatically slower than average. Look for the 🐌 at the end of successful testrun!
 
 3. See per-test stderr and stdout. Even when running tests in parallel!
 
 4. Investigate test performance by generating flamegraphs (or icicle graph) for the entire testrun. See `-save-flamegraph`, `-save-icegraph`, and `-save-palette`.
 
-5. Run your tests in parallel. QA does this for you automatically, for test types `rspec`, `rspec-pendantic`, `minitest`, `minitest-pendantic`, `test-unit`, and `test-unit-pendantic`. The `-pendantic` suffix runs each *method* in a separate child process. (Versus each *case* in its own worker process.)
+5. Run your tests in parallel. QA does this for you automatically. Use `-squash=none` to run each *method* in a separate child process. The default is `-squash=file`, which runs each *file* in its own process.
 
-6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive-base-dir` option for `qa run` records test outcomes across different runs. Use the `qa flaky` command with the same `-archive-base-dir` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
+6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive-base-dir` option records test outcomes across different runs. Use the `qa flaky` command with the same `-archive-base-dir` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
 
 7. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
 
-8. See source code snippets and (with the experimental `-errors-capture-locals`) actual values of local variables for each from of an error's stack trace.
+8. See source code snippets and actual values of local variables for each frame of an error's stack trace.
 
 9. Record test output as TAP-J, using `-save-tapj` option.
 
@@ -28,9 +30,11 @@ For years, the software testing ecosystem has lagged behind other parts of the s
 
 ## What languages and test frameworks does QA support?
 
-Ruby's RSpec, MiniTest, test-unit. Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler. For example, if you're using rspec:
+Ruby 2.3+, and any of: RSpec, MiniTest, test-unit.
+
+Be sure to use `bundle exec` when you run qa, if you're managing dependencies with Bundler. For example, if you're using Rspec:
 ```
-bundle exec qa run rspec
+bundle exec qa rspec
 ```
 
 ## What will QA help me do tomorrow?
@@ -66,7 +70,7 @@ test/
 Example usage and output:
 ```
 > cd $project
-> qa run minitest
+> qa minitest
 ...
 ```
 
@@ -74,7 +78,7 @@ Example usage and output:
 
 Since QA is still in alpha, there are a number of rough edges.
 
-If `qa run` seems to be acting strangely and isn't providing a reasonable error message, you may be experiencing a bug relating to swallowed error output. This is tied to QA's stdout and stderr capture logic. Adding the `-capture-standard-fds=false` option will disable the capture logic and should allow the original error to bubble up. Please [open an issue](https://github.com/ajbouh/qa/issues/new) with the error output.
+If `qa` seems to be acting strangely and isn't providing a reasonable error message, you may be experiencing a bug relating to swallowed error output. This is tied to QA's stdout and stderr capture logic. Adding the `-capture-standard-fds=false` option will disable the capture logic and should allow the original error to bubble up. Please [open an issue](https://github.com/ajbouh/qa/issues/new) with the error output.
 
 ## What are flaky tests?<a name="whatis_flaky"></a>
 
@@ -87,13 +91,13 @@ So that's the bad news: by their very nature, flaky tests are hard to avoid. In 
 ## How do I use QA to detect flaky tests?
 An example session
 ```
-$ qa run -archive-base-dir ~/.qa/archive
+$ qa minitest -archive-base-dir ~/.qa/archive
   # ... unexpected test failure
-$ qa run -archive-base-dir ~/.qa/archive
+$ qa minitest -archive-base-dir ~/.qa/archive
   # ... that same test now passes
 ```
 
-To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `-archive-base-dir` as given to `qa run`. For example, continuing the session from above:
+To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `-archive-base-dir` as given to other `qa` commands. For example, continuing the session from above:
 
 ```
 $ qa flaky -archive-base-dir ~/.qa/archive
@@ -101,7 +105,7 @@ $ qa flaky -archive-base-dir ~/.qa/archive
 
 ## How does QA detect flaky tests?
 
-At a high level, QA considers a test to be flaky if, for a particular code revision, that test has both passed and failed. That's why you should provide a `-suite-coderef` value to `qa run`.
+At a high level, QA considers a test to be flaky if, for a particular code revision, that test has both passed and failed. That's why you should provide a `-suite-coderef` value to `qa` commands.
 
 At a low level, QA uses a few tricks to find as many examples of a flaky failure as it can. The actual algorithm for discovering flaky tests is:
 - Fingerprint all failures using:
@@ -111,8 +115,8 @@ At a low level, QA uses a few tricks to find as many examples of a flaky failure
 - Find all tests that, for a single revision, have both passed and failed.
 - Put test failures from different revisions in the same bucket if their fingerprint matches a known flaky test
 
-## How will QA help me with test flakiness?
-Now the good news: with QA, we've set out to address the shortcomings we see with today's testing tools. We want a toolset that's *fast* and gives us more firepower for dealing with the reality of flaky tests.
+## How will future versions of QA help me with test flakiness?
+With QA, we've set out to address the shortcomings we see with today's testing tools. We want a toolset that's *fast* and gives us more firepower for dealing with the reality of flaky tests.
 
 - **Testing code that includes dependencies you didn't write?** QA will isolate tests from network services using an OS-specific sandbox.
 
@@ -153,7 +157,7 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 - [X] Add TAP-J analysis tools, to detect rates of flakiness in tests
 - [ ] Add support for marking some tests as (implicitly?) new, forcing them to be run many times and pass every time
 - [ ] Add support for marking tests as flaky, separating their results from the results of other tests
-- [ ] For tests that are failing flakily, show distribution of which line failed, test duration, version of code
+- [x] For tests that are failing flakily, show distribution of which line failed, test duration, version of code
 
 ### Continuous integration
 - [ ] Add support for auto-filing issues (or updating existing issues) when a merged test fails that should not be flaky
@@ -162,7 +166,8 @@ Now the good news: with QA, we've set out to address the shortcomings we see wit
 ### Local development
 - [ ] Order test run during local development based on what's failed recently
 - [ ] Line-level code coverage report
-- [ ] Rerunning tests during local development affected by what code you just modified (test code or AUT, using code coverage analysis)
+- [x] Rerunning tests during local development affected by what code you just modified (test code or AUT, using code coverage analysis)
+- [ ] Line-level test rerunning, using code coverage
 - [ ] Limit tests to files that are open in editor (open test files, open AUT files, etc)
 - [ ] Can run with git-bisect to search for commit that introduced a bug
 - [ ] Suggest which failing tests to debug first (based on heuristics)

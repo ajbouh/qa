@@ -1,0 +1,106 @@
+# qa minitest -watch
+
+0 # Qa is a test runner that runs your tests quickly and
+0 # intelligently. It does this using a combination of
+0 # parallelism, dependency analysis, and file watching.
+0 #
+0 # Qa works with your existing rspec, minitest, or
+0 # test-unit tests.
+0 #
+0 # We'll be using the ruby-mime-types test suite to
+0 # demonstrate how to use qa's -watch option.
+0 #
+0 git remote get-url origin; git reset --hard aa499d1; tree ./test
+
+0 #
+0 # First fix a parallelism bug in the cache tests.
+
+0 git apply ../patches/fix-cache-test-parallelism.patch; git diff -U2
+
+
+0 #
+0 # Now start qa and add a new test.
+
+
+1& bundle exec qa minitest -watch
+
+
+0 cat > test/test_mime_type_enumerable.rb <<'EOF'
+require 'mime/types'
+require 'minitest_helper'
+
+describe MIME::Types, 'registry' do
+  def setup; MIME::Types.send(:load_default_mime_types); end
+
+  describe 'is enumerable' do
+    it 'is deterministic, but not memoized' do
+      a, b = MIME::Types.each.to_a, MIME::Types.each.to_a
+      assert_equal a, b
+      refute_same a, b
+    end
+
+    it 'is sortable' do
+      assert_equal MIME::Types.each.sort, MIME::Types.each.to_a.sort
+    end
+  end
+end
+EOF
+
+0 #
+0 # Cool, qa saw our test and ran it. Next up, editing!
+
+0& vi test/test_mime_type_enumerable.rb -c ':syntax on'
+0& GA
+
+
+0& # What if there's a syntax error in our file?
+
+0& end
+0E Escape
+0& :w
+
+
+0& GA
+0& # Let's fix that and try something else.
+0E Escape
+0& dddddddddd:w
+
+0& 1G/to_a.sort
+0& ddkA
+0&       require_relative 'enumerable_helper'
+0&       assert_equal enum_sort(MIME::Types), MIME::Types.each.to_a.sort
+0E Escape
+0& :w
+
+0& A      # Hmm, qa is right. There is no enumerable_helper.rb. Let's add it.
+
+0E Escape
+0& :edit! test/enumerable_helper.rb
+0& Adef enum_sort(e)
+0&   e.each.srot
+0& end
+0E Escape
+0& :w
+
+0& A# As you can see, qa re-ran the test our edits affected.
+0& # Sadly, I made a typo. Let's fix it.
+
+0E Escape
+0& dddddd/srot
+0& dwdxAsort
+0E Escape
+0& :w
+
+0& GA
+0& # Success!
+
+0E Escape
+0 :q!
+0 #
+0 # Learn more about how qa can help you write better code, faster:
+0 # https://github.com/ajbouh/qa
+0 #
+0 # Thanks for watching and happy hacking!
+0 #
+
+1E C-c

@@ -35,11 +35,18 @@ module Statistics
     (p.call(sorted[(len - 1) / 2]) + p.call(sorted[len / 2])) / 2.0
   end
 
+  def percentile(sorted, pcnt, &p)
+    len = sorted.length
+    (p.call(sorted[((len - 1) * pcnt).to_i]) + p.call(sorted[(len * pcnt).to_i])) / 2.0
+  end
+
   def run_maths(hash_array, &p)
+    sorted_hash_array = hash_array.sort_by(&p)
     {
       "mean" => mean(hash_array, &p),
-      "median" => median(hash_array, &p),
-      "std_dev" => std_dev(hash_array, &p),
+      "min" => p.call(sorted_hash_array[0]),
+      "median" => percentile(sorted_hash_array, 0.5, &p),
+      "max" => p.call(sorted_hash_array[-1]),
       "count" => hash_array.length
     }
   end
@@ -85,6 +92,7 @@ class Summarizer
   #     }
   #   }
   # }
+  OUTCOME_INDICES = "abcdefghijklmnopqrstuvwxyz"
   def summarize(test_results)
     test_summaries = summaries_by_test_id(test_results)
 
@@ -95,9 +103,22 @@ class Summarizer
       groups = observations.group_by(&@subgroup_by_proc)
 
       groups.each do |outcome_digest, obs_array|
+        set_summary_value = ->(k, v) do
+          (summary[k] ||= {})[outcome_digest] = v
+        end
+
+        # Assume sampling the "prototype" observation for each group
+        # is adequate.
+        prototype = obs_array[0]
+        set_summary_value.("status", prototype['status'])
+        set_summary_value.("file", prototype['file'])
+        set_summary_value.("line", prototype['line'])
+        set_summary_value.("prototype", prototype)
+        set_summary_value.("exception", prototype['exception'])
+
         Statistics.run_maths(obs_array, &@duration_proc).each do |k, v|
           begin
-            (summary[k] ||= {})[outcome_digest] = v
+            set_summary_value.(k, v)
           rescue
             $stderr.puts "summary #{summary} k #{k} outcome_digest #{outcome_digest} v #{v}"
             raise
@@ -105,7 +126,26 @@ class Summarizer
         end
       end
       summary["outcome-digests"] = groups.keys
+      summary["outcome-digests"].sort_by! do |outcome_digest|
+        summary["count"][outcome_digest]
+      end.reverse!
 
+      # Indent a little, then print a single letter for each observation
+      outcomes = ""
+      outcome_indices = Hash.new { |h, k| h[k] = (OUTCOME_INDICES[h.size] || "!") }
+
+      observations.each do |t|
+        status = t["status"]
+        case status
+        when "pass"
+          outcomes << "."
+        else
+          outcomes << outcome_indices[@subgroup_by_proc.call(t)]
+        end
+      end
+
+      summary["outcome-sequence"] = outcomes
+      summary["outcome-index"] = outcome_indices
       summary["total-count"] = observations.length
       summary["pass-count"] = observations.count(&@success_if_proc)
       summary["fail-count"] = observations.length - summary["pass-count"]
@@ -135,13 +175,13 @@ class Summarizer
       next if @ignore_if_proc.call(t)
 
       id = @group_by_proc.call(t)
-      test_summary = (test_summaries[id] ||= {"id" => id, "observations" => []})
-      test_summary["observations"].push(t)
+      summary = (test_summaries[id] ||= {"id" => id, "observations" => []})
+      summary["observations"].push(t)
     end
 
     # Sort observations.
-    test_summaries.each do |test_id, test_summary|
-      test_summary["observations"].sort_by!(&@sort_by_proc)
+    test_summaries.each do |test_id, summary|
+      summary["observations"].sort_by!(&@sort_by_proc)
     end
 
     test_summaries.values
@@ -154,23 +194,91 @@ end
 require 'pp'
 
 class Printer
-  def print_summary(test_summaries, aces_count)
-    format = "%8s %8s  %-100s %15s %15s %15s\n"
-    printf(format,
-        "PassRt", "Count", "Description", "Mean (s)", "Med (s)", "StdDev (s)")
+  MESSAGE_WIDTH = 70
+  MESSAGE_FORMAT = "%-70s"
+  OVERALL_HEADER_FORMAT = "%3s %-#{MESSAGE_WIDTH}s  %4s  %5s  %s\n"
+  OVERALL_FORMAT  = "%3s \e[0;1m%-#{MESSAGE_WIDTH + 6}s\e[0m  %5s  %s\n"
+  OUTCOMES_FORMAT = "%3s %-#{MESSAGE_WIDTH + 6}s  %5s  %s\n"
+  OUTCOME_FORMAT  = "    %s) %-#{MESSAGE_WIDTH - 3}s  %4s  %5s  %s\n"
 
-    test_summaries.each { |details| print_test_summary(details, format) }
+  def print_overall_header
+    printf(OVERALL_HEADER_FORMAT, "", "Description", "Rate", "Count", "Location")
+  end
+
+  def print_overall(summary, summary_ix)
+    total_count = summary["total-count"]
+
+    file, line = summary["file"]["pass"], summary["line"]["pass"]
+    file = file.sub(Dir.pwd, '.') if file.start_with?(Dir.pwd + "/")
+    printf(OVERALL_FORMAT,
+        "#{summary_ix + 1})",
+        summary["id"].flatten.compact.join(" ▸ "),
+        "#{total_count}",
+        "#{file}:#{line}",
+    )
+
+    # Indent a little, then print a single letter for each observation
+    outcomes = sprintf(MESSAGE_FORMAT, summary["outcome-sequence"].dup)
+    outcomes.gsub!(/([^\.])/, "\e[31;1m\\1\e[0m")
+    outcomes.gsub!(/\./, "\e[32;1m.\e[0m")
+
+    printf(OUTCOMES_FORMAT, "", outcomes, "", "", "", "")
+
+    # "  #{outcome_digest}", # Indent a little
+    # "Mean", "Min", "Md", "Max"
+    # summary["mean"][outcome_digest].round(3),
+    # summary["min"][outcome_digest].round(3),
+    # summary["median"][outcome_digest].round(3),
+    # summary["max"][outcome_digest].round(3),
+  end
+
+  def print_outcome(summary, outcome_digest)
+    get_summary_value = ->(k) do
+      h = summary[k] || raise("no summary value '#{k}' for #{outcome_digest}")
+      h[outcome_digest]
+    end
+
+    total_count = summary["total-count"]
+    count = get_summary_value.("count")
+    percent = ((count.to_f / total_count) * 100.0).round(0)
+    message = ""
+
+    location = get_summary_value.("file")
+    if line = get_summary_value.("line")
+      location = "#{location}:#{line}"
+    end
+
+    if exception = get_summary_value.("exception")
+      message = exception['message'].gsub(/\n/, '↩')
+      if backtrace = exception['backtrace']
+        if frame = backtrace[0]
+          location = "#{frame['file']}:#{frame['line']}"
+        end
+      end
+    end
+
+    printf(OUTCOME_FORMAT,
+        get_summary_value.("outcome-index"),
+        message,
+        "#{percent}%",
+        "#{count}",
+        location,
+    )
+  end
+
+  def print_summary(test_summaries, aces_count)
+    print_overall_header
 
     puts "#{aces_count} other tests with no failures." if aces_count && aces_count > 0
+
+    test_summaries.each_with_index { |summary, summary_ix| print_test_summary(summary, summary_ix) }
   end
 
   def print_test_id_detail(test_summaries, test_id)
-    format = "%8s %8s  %-100s %15s %15s %15s\n"
-    printf(format,
-        "PassRt", "Count", "Description", "Mean (s)", "Med (s)", "StdDev (s)")
+    print_overall_header
 
     test = test_summaries.select { |v| v['id'] == test_id }
-    test.each { |details| print_test_summary(details, format) }
+    test.each_with_index { |summary, summary_ix| print_test_summary(summary, summary_ix) }
 
     pp test
   end
@@ -183,49 +291,17 @@ class Printer
     "n/a"
   end
 
-  def print_test_summary(test_details, format)
-    total_count = test_details["total-count"]
-    pass_count = test_details["pass-count"]
-    pass_rate = format_percentage(pass_count, total_count)
+  def print_test_summary(summary, summary_ix)
+    print_overall(summary, summary_ix)
 
-    printf(format,
-      pass_rate,
-      "#{pass_count}/#{total_count}",
-      test_details["id"],
-      "",
-      "",
-      ""
-    )
-
-    # Indent a little, then print a single letter for each observation
-    outcomes = ""
-    test_details["observations"].each do |t|
-      status = t["status"]
-      case status
-      when "pass"
-        outcomes << "."
-      else
-        outcomes << status[0].upcase
-      end
-    end
-    printf(format, "", "", outcomes, "", "", "")
-
-    outcome_digests = test_details["outcome-digests"].sort_by do |outcome_digest|
-      test_details["count"][outcome_digest]
-    end.reverse
-
-    outcome_digests.each do |outcome_digest|
-      printf(format,
-          "",
-          stats["observations"][outcome_digest],
-          "   #{stats["statuses"][outcome_digest]}", # Indent a little
-          stats["mean"][outcome_digest].round(1),
-          stats["median"][outcome_digest].round(1),
-          stats["std_dev"][outcome_digest].round(1),
-      )
+    outcome_ix = 0
+    summary["outcome-digests"].each do |outcome_digest|
+      next if outcome_digest == 'pass'
+      print_outcome(summary, outcome_digest)
+      outcome_ix += 1
     end
 
-    printf(format, "", "", "", "", "", "") # Empty line between test summaries
+    puts # Empty line between test summaries
   end
 end
 
@@ -355,7 +431,7 @@ if show_aces
   show = test_summaries
 else
   show = test_summaries.select { |v| v["fail-count"] > 0 }
-  hidden_aces = test_summaries.select { |v| v["fail-count"] == 0 }
+  hidden_aces = nil
 end
 
 case format.downcase

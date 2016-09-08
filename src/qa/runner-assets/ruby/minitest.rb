@@ -51,7 +51,7 @@ class TapJRunner
 
   def preview(result)
     @test_start = ::Qa::Time.now_f
-    if Minitest.const_defined?(:Spec) && @result.class < Minitest::Spec
+    if Minitest.const_defined?(:Spec) && result.class < Minitest::Spec
       @test_label = result.name.sub(/^test_\d+_/, '').gsub('_', ' ')
     else
       @test_label = result.name
@@ -86,11 +86,13 @@ class TapJRunner
 
     @results << result
 
+    file, line = result.method(result.name).source_location
     doc = {
       'type'        => 'test',
       'subtype'     => '',
       'filter'      => "#{result.class}##{result.name}",
-      'file'        => result.method(result.name).source_location[0], # returns [file, line]
+      'file'        => file,
+      'line'        => line,
       'label'       => @test_label,
       'time' => result.time
     }
@@ -143,7 +145,11 @@ class TapJRunner
     filter = Regexp.new $1 if filter =~ /\/(.*)\//
 
     @test_count = test_cases.inject(0) do |acc, test_case|
-      acc + test_case.runnable_methods.grep(filter).length
+      filtered_methods = test_case.runnable_methods.find_all { |m|
+        filter === m || filter === "#{test_case}##{m}"
+      }
+
+      acc + filtered_methods.length
     end
   end
 end
@@ -173,14 +179,26 @@ engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
     Minitest::Test.send(:extend, ::Qa::MinitestRunnerClassMethods)
   end
 
+  filter = tests.empty? ? nil : "/^(#{tests.map{|test|Regexp.escape(test)} * '|'})$/"
   options = {
     seed: opt.seed,
     io: tapj_conduit,
     trace: qa_trace,
-    filter: tests.empty? ? nil : "/^(?:#{tests.map{|test|Regexp.escape(test)} * '|'})$/",
+    filter: filter,
   }
 
   srand(options[:seed] % 0xFFFF)
+
+  class_name_collisions = Hash.new { |h, k| h[k] = [] }
+  Minitest::Runnable.runnables.each do |runnable|
+    class_name_collisions[runnable.name].push(runnable)
+  end
+  class_name_collisions.each do |name, classes|
+    next unless classes.length > 1
+    classes.each_with_index do |klass, index|
+      klass.instance_variable_set(:@name, "#{name}[#{index}]")
+    end
+  end
 
   reporter = TapJRunner.new(options)
 

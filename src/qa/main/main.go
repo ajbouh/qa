@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"qa/cmd"
-	"qa/cmd/auto"
 	"qa/cmd/discover"
 	"qa/cmd/flaky"
 	"qa/cmd/flamegraph"
@@ -31,10 +30,14 @@ func main() {
 		err = grouping.Main(env, os.Args[2:])
 	case "summary":
 		err = summary.Main(env, os.Args[2:])
-	case "auto":
-		err = auto.Main(env, os.Args[2:])
 	case "run":
 		err = run.Main(env, os.Args[2:])
+	case "rspec":
+		err = run.Framework("rspec", env, os.Args[2:])
+	case "minitest":
+		err = run.Framework("minitest", env, os.Args[2:])
+	case "test-unit":
+		err = run.Framework("test-unit", env, os.Args[2:])
 	case "flamegraph":
 		// TODO(adamb) Switch flamegraph to use env arg
 		err = flamegraph.Main(os.Args[2:])
@@ -46,8 +49,12 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		status = 1
+		if quietError, ok := err.(*cmd.QuietError); ok {
+			status = quietError.Status
+		} else {
+			fmt.Fprintln(os.Stderr, err)
+			status = 1
+		}
 
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if len(exitError.Stderr) > 0 {

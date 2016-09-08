@@ -40,19 +40,19 @@ func (t *TraceWriter) TraceEvent(event TraceEvent) error {
 	return nil
 }
 
-func (t *TraceWriter) SuiteFinished(event FinalEvent) error {
+func (t *TraceWriter) SuiteFinish(event SuiteFinishEvent) error {
 	return nil
 }
 
-func (t *TraceWriter) SuiteStarted(event SuiteEvent) error {
+func (t *TraceWriter) SuiteBegin(event SuiteBeginEvent) error {
 	return nil
 }
 
-func (t *TraceWriter) TestStarted(event TestStartedEvent) error {
+func (t *TraceWriter) TestBegin(event TestBeginEvent) error {
 	return nil
 }
 
-func (t *TraceWriter) TestFinished(event TestEvent) error {
+func (t *TraceWriter) TestFinish(event TestFinishEvent) error {
 	return nil
 }
 

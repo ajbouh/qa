@@ -1,0 +1,34 @@
+# qa flaky
+
+# We'll be using the ruby-mime-types test suite to
+# demonstrate finding flaky tests with qa.
+#
+git remote get-url origin; git reset --hard aa499d1; tree ./test
+
+#
+# First fix a parallelism bug in the cache tests.
+# Test processes must use separate scratch files.
+#
+git apply ../patches/fix-cache-test-parallelism.patch
+git diff -U2; git add --update
+
+#
+# Break one test so it will never pass, and another
+# test to pass ~25% of the time, fail one way ~50%
+# of the time, and otherwise fail another way.
+#
+git apply ../patches/introduce-faults.patch
+git diff -U2; git add --update
+
+#
+# Record enough data for qa to analyze.
+#
+for x in $(seq 12)
+do
+  bundle exec qa run -archive-base-dir=.qa-archive -quiet minitest
+done
+
+#
+# Now use qa to find that flaky test!
+#
+qa flaky -archive-base-dir=.qa-archive
