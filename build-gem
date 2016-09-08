@@ -1,0 +1,56 @@
+set -ex
+
+if [ $GIMME_PLATFORM = "+macosx+x86_64" ]; then
+  export GEM_PLATFORM=x86_64-darwin-15
+elif [ $GIMME_PLATFORM = "+linux+x86_64" ]; then
+  export GEM_PLATFORM=x86_64-linux
+else
+  echo "Unknown platform: $GIMME_PLATFORM" >&2
+  exit 1
+fi
+
+GEM_NAME=qa-tool
+export GEM_VERSION=$(cat VERSION)
+export GEM_DATE=$(ruby -e "puts Time.at(ARGV[0].to_i).strftime('%F')" $(git log -n 1 --format=%ct))
+
+cd $GIMME_SCRATCH
+
+mkdir bin libexec
+cp $(gimme-target-output-dir qa:qa)/bin/qa libexec/
+chmod -R a+r libexec
+
+cat > bin/qa <<EOF
+#!/usr/bin/env ruby
+
+exec(File.expand_path('../../libexec/qa', __FILE__), *ARGV)
+EOF
+chmod +x,a+r bin/qa
+
+cat > $GEM_NAME.gemspec <<EOF
+Gem::Specification.new do |s|
+  s.name        = '$GEM_NAME'
+  s.version     = "$GEM_VERSION"
+  s.date        = "$GEM_DATE"
+  s.summary     = <<-EOF
+Qa is a test runner that runs your existing tests quickly and
+intelligently. It does this using parallelism, dependency
+analysis, and file watching.
+
+Qa works with your existing rspec, minitest, or test-unit tests.
+  EOF
+  s.description = "A lightweight tool for running your tests fast."
+  s.authors     = ["Adam Bouhenguel"]
+  s.email       = 'adam@bouhenguel.com'
+  s.platform    = "$GEM_PLATFORM"
+  s.executables << "qa"
+  s.files       = ["libexec/qa"]
+  s.homepage    = 'https://github.com/ajbouh/qa'
+  s.license     = 'MIT'
+  s.required_ruby_version = '>= 2.1.0'
+end
+
+EOF
+
+gem build $GEM_NAME.gemspec
+
+mv ${GEM_NAME}*.gem $GIMME_OUTPUT/

@@ -47,7 +47,16 @@ bundle exec qa rspec
 
 ## Getting started with QA
 
-QA is not yet available via brew, apt, or any other software distribution repository. To start using it, you'll need to download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`.
+Starting with the 0.17 release, QA is now available as the 'qa-tool' rubygem. You can add 'qa-tool' to your gem's development dependencies, or add the following to your Gemfile:
+```
+gem 'qa-tool'
+```
+
+Don't forget to run `bundle install` if you edit your Gemfile!
+
+If you aren't using bundler or some other gem dependency management tool, you have a few options.
+
+You can download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`.
 
 You can also run the command below to download and unpack the latest release to the current directory.
 ```

@@ -39,6 +39,19 @@
       "prepend-platform-env": {
         "PATH": ["bin"]
       }
+    },
+    "gem": {
+      "deps": {
+        "packaged": [
+          "qa:qa"
+        ],
+        "build": [
+          "vendor/ruby:ruby"
+        ]
+      },
+      "commands": [
+        "./build-gem"
+      ]
     }
   }
 }
