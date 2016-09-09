@@ -148,9 +148,9 @@ func (s *Server) run() error {
 			close(acceptTokenChan)
 		}()
 
-		go func() {
-			reason := errors.New("No longer running")
+		reason := errors.New("No longer running")
 
+		go func() {
 			for entry := range s.registerChannelChan {
 				entry.errChan <- reason
 				close(entry.errChan)
@@ -158,7 +158,6 @@ func (s *Server) run() error {
 		}()
 
 		go func() {
-			reason := errors.New("No longer running")
 			// Drain remaining visitor registrations
 			for entry := range s.registerCallbackChan {
 				err := entry.visitor.End(reason)
@@ -180,6 +179,18 @@ func (s *Server) run() error {
 					entry.errChan <- reason
 				}
 				close(entry.errChan)
+			}
+
+			for k, entry := range s.exposedChannels {
+				delete(s.exposedChannels, k)
+				entry.errChan <- reason
+				close(entry.errChan)
+
+				go func(ch chan interface{}) {
+					for _ = range ch {
+
+					}
+				}(entry.ch)
 			}
 		}()
 
@@ -358,7 +369,7 @@ func (s *Server) Decode(callbacks tapjio.Visitor) (string, chan error, error) {
 
 // Decode returns a server address that can be used by a test runner to
 // stream tapj results.
-func (s *Server) ExposeChannel(ch chan interface{}) (string, chan error, error) {
+func (s *Server) ExposeChannel() (string, chan interface{}, chan error, error) {
 	// TODO(adamb) Fire off error handlers on callbacks if server shuts down without
 	//    response.
 
@@ -368,11 +379,12 @@ func (s *Server) ExposeChannel(ch chan interface{}) (string, chan error, error) 
 	if s.isRunning {
 		// Make new token
 		token := randomToken(16)
+		ch := make(chan interface{}, 1)
 		errChan := make(chan error, 1)
 		s.registerChannelChan <- registerChannelEntry{token, ch, errChan}
 		address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
-		return address, errChan, nil
+		return address, ch, errChan, nil
 	} else {
-		return "", nil, fmt.Errorf("Server is not running; can't expose %#v", ch)
+		return "", nil, nil, fmt.Errorf("Server is not running; can't expose a channel",)
 	}
 }

@@ -28,8 +28,6 @@ type context struct {
 }
 
 func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *ContextConfig) (*context, error) {
-	requestCh := make(chan interface{}, 1)
-
 	runnerCfg := cfg.RunnerConfig
 
 	files, err := runnerCfg.Files()
@@ -54,8 +52,7 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 		args = append(args, "-I", lib)
 	}
 
-	// TODO(adamb) check currently ignored errChan
-	address, requestErrChan, err := srv.ExposeChannel(requestCh)
+	address, requestCh, requestErrChan, err := srv.ExposeChannel()
 	if err != nil {
 		return nil, err
 	}
