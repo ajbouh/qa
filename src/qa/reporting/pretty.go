@@ -256,7 +256,8 @@ func (self *Pretty) TestFinish(test tapjio.TestFinishEvent) error {
 
 				format := "      %- " + strconv.Itoa(maxVarNameLength) + "s = %s\n"
 				for varName, varValue := range vars {
-					fmt.Fprintf(self.writer, format, varName, varValue)
+					singleLineValue := strings.Replace(varValue, "\n", "↩ ", -1)
+					fmt.Fprintf(self.writer, format, varName, singleLineValue)
 				}
 			}
 

@@ -473,25 +473,6 @@ module Qa::Time
   end
 end
 
-module Qa::Backtrace
-  module_function
-
-  def cleanup(backtrace)
-    load_path = $LOAD_PATH
-    backtrace.reverse_each.map do |line|
-      if line =~ /(.*)\:(\d+)\:in `(.*)'/
-        file, number, method = $1, $2, $3
-      else
-        file, number, method = line, 0, nil
-      end
-      if prefix = load_path.find { |p| file.start_with?(p) }
-        file = file[(prefix.length+1)..-1]
-      end
-      block_given? ? yield(file, number, method) : "#{file}:#{number}:in `#{method}'"
-    end
-  end
-end
-
 module Qa::Stats; end
 
 class Qa::Stats::LinuxMemory
@@ -1070,6 +1051,13 @@ module Qa::TapjExceptions
       message ||= error.message
     end
 
+    # eliminate ourselves from the list.
+    internal_file_patterns = [
+      /-e/,
+      %r%minitest.rb|minitest/%
+    ]
+    here = File.realpath(Dir.pwd) + File::SEPARATOR
+
     backtrace = backtrace.each_with_index.map do |entry, index|
       entry =~ /(.+?):(\d+)(?:\:in `(.*)')?/ || (next nil)
 
@@ -1088,7 +1076,12 @@ module Qa::TapjExceptions
         method = $1
       end
 
-      if prefix = load_path.find { |p| raw_file.start_with?(p) }
+      # Simplify paths as much as we can.
+      if raw_file == "-e" || raw_file == "(eval)"
+        file = raw_file
+      elsif raw_file.start_with?(here)
+        file = raw_file.sub(here, './')
+      elsif prefix = load_path.find { |p| raw_file.start_with?(p) }
         file = raw_file[(prefix.length+1)..-1]
       else
         file = raw_file
@@ -1097,8 +1090,8 @@ module Qa::TapjExceptions
       h = {"raw-file" => raw_file, "line" => line, "file" => file}
       h["method"] = method if method
       h["block_level"] = block_level if block_level && block_level > 0
-
-      if backtrace_bindings && b = backtrace_bindings[index]
+      h["internal"] = internal_file_patterns.any? { |re| re =~ file }
+      if !h["internal"] && backtrace_bindings && b = backtrace_bindings[index]
         locals = b.eval("local_variables")
         h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
       end
@@ -1134,16 +1127,9 @@ module Qa::TapjExceptions
 
   # Clean the backtrace of any reference to test framework itself.
   def filter_backtrace(bt)
-    # eliminate ourselves from the list.
-    mt_re = %r%minitest.rb|minitest/%
-
-    new_bt = bt.take_while { |e| f = e['file']; f !~ mt_re && !f.start_with?("-e") }
-    new_bt = bt.select     { |e| f = e['file']; f !~ mt_re && !f.start_with?("-e") } if new_bt.empty?
-    new_bt = bt.dup                                                                 if new_bt.empty?
-
-    ## simplify paths to be relative to current working diectory
-    here = Dir.pwd+File::SEPARATOR
-    new_bt.each { |e| e['file'] = e['file'].sub(here,'') }
+    new_bt = bt.take_while { |e| !e['internal'] }
+    new_bt = bt.select     { |e| !e['internal'] } if new_bt.empty?
+    new_bt = bt.dup                               if new_bt.empty?
 
     new_bt
   end

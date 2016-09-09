@@ -113,9 +113,9 @@ func TestDetectFlaky(t *testing.T) {
 		"pass-count": 1,
 		"fail-count": 5,
 		"count": {
-			"fail:466404515d7d0016850e29ea8cbffb16335da921": 1,
-			"fail:28c9eed3b5efa356cb78ce4dd9a028507eb61e56": 2,
-			"error:0c52dfdddef8fd1ef8fe3abfd429c2fa0174a4d7": 2,
+			"fail:ed39cd64354ca00d72c29799fc9bc013c2b62455": 1,
+			"fail:009c8245aeb284a57864c957947418f58296b3d4": 2,
+			"error:498e0db89422d016523f5309e55300f07642ae4f": 2,
 			"pass": 1
 		}
   },
@@ -125,9 +125,9 @@ func TestDetectFlaky(t *testing.T) {
 		"pass-count": 1,
 		"fail-count": 5,
 		"count": {
-			"fail:b8919726a12ab7672e38059f3b85cdbafbe8e87f": 1,
-			"fail:7c7656d9c4de343894639afda9cee5db4b608230": 2,
-			"error:6cffc4f3944405351816fc766014830e15058bde": 2,
+			"fail:5789b8d214aa8d3152268191683010c1dc6da2ad": 1,
+			"fail:35c14e60e327c7c555d36a8b8a17aec094a31586": 2,
+			"error:87f44f5622552a0c88645dc1c479bf72bccff65f": 2,
 			"pass": 1
 		}
   }
