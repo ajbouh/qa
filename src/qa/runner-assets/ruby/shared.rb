@@ -1531,7 +1531,7 @@ module ::Qa::Warmup::RailsActiveRecord
           connection_cache = cache[:rails_database_connections]
           config = rails_database_configuration
           if config['database'] == default_db && envs.length > 1 && defined?(ActiveRecord::NoDatabaseError)
-            config['database'] = "#{config['database']}_qa#{env['QA_WORKER']}"
+            config['database'] = "#{config['database']}_qa#{env['TEST_ENV_NUMBER']}"
 
             $__qa_stderr.puts "Warming up (overridden) config #{config}"
             ActiveRecord::Base.establish_connection(config)
@@ -1907,7 +1907,7 @@ class ::Qa::TestEngine
           tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
         end
 
-        qa_trace = ::Qa::Trace.new(env['QA_WORKER'] || Process.pid) do |e|
+        qa_trace = ::Qa::Trace.new(env['TEST_ENV_NUMBER'] || Process.pid) do |e|
           tapj_conduit.emit({'type'=>'trace', 'trace'=>e})
         end
         trace_probes.each { |trace_probe| qa_trace.define_tracer(trace_probe) }

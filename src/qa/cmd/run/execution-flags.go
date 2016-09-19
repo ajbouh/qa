@@ -98,7 +98,10 @@ func (f *executionFlags) WorkerEnvs() []map[string]string {
 	workerEnvs := []map[string]string{}
 	for i := 0; i < *f.jobs; i++ {
 		workerEnvs = append(workerEnvs,
-			map[string]string{"QA_WORKER": fmt.Sprintf("%d", i)})
+			map[string]string{
+				"QA_WORKER": fmt.Sprintf("%d", i),
+				"TEST_ENV_NUMBER": fmt.Sprintf("%d", i),
+			})
 	}
 
 	return workerEnvs

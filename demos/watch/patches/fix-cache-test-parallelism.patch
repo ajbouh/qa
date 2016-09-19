@@ -4,12 +4,11 @@ index 3b5859b..abae4b0 100644
 +++ b/test/test_mime_types_cache.rb
 @@ -12,7 +12,9 @@ describe MIME::Types::Cache do
      require 'fileutils'
- 
+
      MUTEX.synchronize do
 -      @cache_file = File.expand_path('../cache.tst', __FILE__)
 +      # Worker processes must use different scratch files.
-+      ix = ENV['QA_WORKER']
++      ix = ENV['TEST_ENV_NUMBER']
 +      @cache_file = File.expand_path("../cache.tst#{ix}", __FILE__)
        ENV['RUBY_MIME_TYPES_CACHE'] = @cache_file
        clear_cache_file
- 
