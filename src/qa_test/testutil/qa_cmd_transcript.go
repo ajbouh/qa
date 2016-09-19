@@ -3,9 +3,9 @@ package testutil
 import (
 	"bytes"
 	"io"
-	"os"
 	"qa/cmd"
 	"qa/tapjio"
+	"sync"
 )
 
 type Transcript struct {
@@ -51,8 +51,23 @@ func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
 
 type QaCmd func(*cmd.Env, []string) error
 
+type buffer struct {
+    b bytes.Buffer
+    m sync.Mutex
+}
+func (b *buffer) Write(p []byte) (n int, err error) {
+    b.m.Lock()
+    defer b.m.Unlock()
+    return b.b.Write(p)
+}
+func (b *buffer) String() string {
+    b.m.Lock()
+    defer b.m.Unlock()
+    return b.b.String()
+}
+
 func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, args []string) (stderr string, err error) {
-	var stderrBuf bytes.Buffer
+	var stderrBuf = buffer{bytes.Buffer{}, sync.Mutex{}}
 
 	rd, wr := io.Pipe()
 	defer rd.Close()
@@ -60,7 +75,7 @@ func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, arg
 
 	errCh := make(chan error, 2)
 	go func() {
-    env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: os.Stderr, Dir: dir}
+    env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: &stderrBuf, Dir: dir}
 		errCh <- fn(env, args)
 
 		wr.Close()
