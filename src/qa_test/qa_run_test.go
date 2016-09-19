@@ -5,6 +5,7 @@ import (
 	"qa/cmd/run"
 	"qa/tapjio"
 	"qa_test/testutil"
+	"strconv"
 	"testing"
 	"time"
 
@@ -69,37 +70,44 @@ func TestRun(t *testing.T) {
 		"wrong count in final event. Events: %#v, Stderr: %v\n", tscript.Events, tscript.Stderr)
 }
 
-func runQaFramework(frameworkName, dir, glob string) (*testutil.Transcript, error) {
-	tscript, visitor := testutil.NewTranscriptBuilder()
-
-	var err error
-	fn := func(env *cmd.Env, args []string) error {
-		return run.Framework(frameworkName, env, args)
-	}
-
-	tscript.Stderr, err = testutil.RunQaCmd(fn, visitor, nil, dir, []string{
-		"-format=tapj",
-		"-listen-network", "tcp",
-		"-listen-address", "127.0.0.1:0",
-		glob,
-	})
-
-	return tscript, err
-}
-
 type qaFrameworkTest struct {
 	frameworkName string
 	dir           string
 	glob          string
+	runs          int
 	tally         tapjio.ResultTally
 }
 
-func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
-	var tscript *testutil.Transcript
-	var err error
+func sumTallies(finalEvents []tapjio.SuiteFinishEvent) *tapjio.ResultTally {
+	if len(finalEvents) == 1 {
+		return finalEvents[0].Counts
+	}
 
+	sum := &tapjio.ResultTally{}
+	for _, event := range finalEvents {
+		sum.IncrementAll(event.Counts)
+	}
+
+	return sum
+}
+
+func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
 	startingTime := time.Now()
-	tscript, err = runQaFramework(test.frameworkName, test.dir, test.glob)
+	tscript, visitor := testutil.NewTranscriptBuilder()
+
+	fn := func(env *cmd.Env, args []string) error {
+		return run.Framework(test.frameworkName, env, args)
+	}
+
+	var err error
+	tscript.Stderr, err = testutil.RunQaCmd(fn, visitor, nil, test.dir, []string{
+		"-format=tapj",
+		"-listen-network", "tcp",
+		"-listen-address", "127.0.0.1:0",
+		"-runs", strconv.Itoa(test.runs),
+		test.glob,
+	})
+
 	duration := time.Now().Sub(startingTime)
 
 	if test.tally.Total == test.tally.Pass {
@@ -135,17 +143,31 @@ func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
 
 	require.Equal(t,
 		test.tally,
-		*tscript.SuiteFinishEvents[0].Counts,
+		*sumTallies(tscript.SuiteFinishEvents),
 		"%v. Wrong count in final event. Events: %#v, Stderr: %v\n", ix, tscript.Events, tscript.Stderr)
 }
 
 var qaFrameworkTests = []qaFrameworkTest{
-	{"rspec", "fixtures/ruby/simple", "spec/**/*spec.rb", tapjio.ResultTally{Total: 2, Pass: 2}},
-	{"rspec", "fixtures/ruby/all-outcomes", "spec/**/*spec.rb", tapjio.ResultTally{Total: 6, Pass: 1, Fail: 1, Todo: 1, Error: 3}},
-	{"minitest", "fixtures/ruby/simple", "test/minitest/**/test*.rb", tapjio.ResultTally{Total: 2, Pass: 2}},
-	{"minitest", "fixtures/ruby/all-outcomes", "test/minitest/**/test*.rb", tapjio.ResultTally{Total: 5, Pass: 1, Fail: 1, Todo: 1, Error: 2}},
-	{"test-unit", "fixtures/ruby/simple", "test/test-unit/**/test*.rb", tapjio.ResultTally{Total: 2, Pass: 2}},
-	{"test-unit", "fixtures/ruby/all-outcomes", "test/test-unit/**/test*.rb", tapjio.ResultTally{Total: 9, Pass: 2, Fail: 2, Todo: 2, Error: 3}},
+	{"rspec", "fixtures/ruby/simple", "spec/**/*spec.rb", 1,
+		tapjio.ResultTally{Total: 2, Pass: 2}},
+	{"minitest", "fixtures/ruby/simple", "test/minitest/**/test*.rb", 1,
+		tapjio.ResultTally{Total: 2, Pass: 2}},
+	{"test-unit", "fixtures/ruby/simple", "test/test-unit/**/test*.rb", 1,
+		tapjio.ResultTally{Total: 2, Pass: 2}},
+
+	{"rspec", "fixtures/ruby/all-outcomes", "spec/**/*spec.rb", 1,
+		tapjio.ResultTally{Total: 6, Pass: 1, Fail: 1, Todo: 1, Error: 3}},
+	{"minitest", "fixtures/ruby/all-outcomes", "test/minitest/**/test*.rb", 1,
+		tapjio.ResultTally{Total: 5, Pass: 1, Fail: 1, Todo: 1, Error: 2}},
+	{"test-unit", "fixtures/ruby/all-outcomes", "test/test-unit/**/test*.rb", 1,
+		tapjio.ResultTally{Total: 9, Pass: 2, Fail: 2, Todo: 2, Error: 3}},
+
+	{"rspec", "fixtures/ruby/all-outcomes", "spec/**/*spec.rb", 3,
+		tapjio.ResultTally{Total: 18, Pass: 3, Fail: 3, Todo: 3, Error: 9}},
+	{"minitest", "fixtures/ruby/all-outcomes", "test/minitest/**/test*.rb", 3,
+		tapjio.ResultTally{Total: 15, Pass: 3, Fail: 3, Todo: 3, Error: 6}},
+	{"test-unit", "fixtures/ruby/all-outcomes", "test/test-unit/**/test*.rb", 3,
+		tapjio.ResultTally{Total: 27, Pass: 6, Fail: 6, Todo: 6, Error: 9}},
 }
 
 func TestFrameworks(t *testing.T) {

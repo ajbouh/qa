@@ -18,7 +18,7 @@ type TestDependencyEntry struct {
 }
 
 type TestRunner interface {
-	Run(env map[string]string, visitor tapjio.Visitor) error
+	Run(env map[string]string, seed int, visitor tapjio.Visitor) error
 	Dependencies() []TestDependencyEntry
 	TestCount() int
 }
@@ -99,7 +99,6 @@ type Config struct {
 	PassthroughConfig map[string](interface{})
 	Dir               string
 	EnvVars           map[string]string
-	Seed              int
 	SquashPolicy      SquashPolicy
 	TraceProbes       []string
 	Filters           []tapjio.TestFilter
@@ -110,7 +109,7 @@ func (f *Config) Files() ([]string, error) {
 }
 
 type Context interface {
-	EnumerateRunners() ([]tapjio.TraceEvent, []TestRunner, error)
+	EnumerateRunners(seed int) ([]tapjio.TraceEvent, []TestRunner, error)
 	Close() error
 }
 
@@ -125,6 +124,7 @@ func RunAll(
 	visitor tapjio.Visitor,
 	workerEnvs []map[string]string,
 	tally *tapjio.ResultTally,
+	seed int,
 	runners []TestRunner) (err error) {
 
 	numWorkers := len(workerEnvs)
@@ -167,6 +167,7 @@ func RunAll(
 
 				err := testRunner.Run(
 					env,
+					seed,
 					&tapjio.DecodingCallbacks{
 						OnTestBegin: func(test tapjio.TestBeginEvent) error {
 							eventChan <- eventUnion{nil, &test, nil, nil}

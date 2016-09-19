@@ -151,7 +151,7 @@ func (self *context) Close() error {
 	return nil
 }
 
-func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
+func (self *context) EnumerateRunners(seed int) (traceEvents []tapjio.TraceEvent, testRunners []runner.TestRunner, err error) {
 	cfg := self.config
 	var currentRunner *rubyRunner
 	serverAddress, errChan, err := self.subscribeVisitor(&tapjio.DecodingCallbacks{
@@ -199,7 +199,7 @@ func (self *context) EnumerateRunners() (traceEvents []tapjio.TraceEvent, testRu
 
 	args := []string{
 		"--dry-run",
-		"--seed", fmt.Sprintf("%v", cfg.RunnerConfig.Seed),
+		"--seed", fmt.Sprintf("%v", seed),
 		"--tapj-sink", serverAddress,
 	}
 	for _, filter := range cfg.RunnerConfig.Filters {
@@ -294,7 +294,7 @@ func (self rubyRunner) Dependencies() []runner.TestDependencyEntry {
 // goes wrong before starting the tests or while processing the a test event.
 // NOTE(adamb) It is not careful about ensuring the test is no longer running in the case of an
 //     error.
-func (self rubyRunner) Run(env map[string]string, visitor tapjio.Visitor) error {
+func (self rubyRunner) Run(env map[string]string, seed int, visitor tapjio.Visitor) error {
 	var allowedBeginFilters, allowedFinishFilters []tapjio.TestFilter
 	allowedBeginFilters = append(allowedBeginFilters, self.filters...)
 	sawBeginFilters := []tapjio.TestFilter{}
@@ -344,7 +344,7 @@ func (self rubyRunner) Run(env map[string]string, visitor tapjio.Visitor) error 
 	if err = self.ctx.request(
 		env,
 		append([]string{
-			"--seed", fmt.Sprintf("%v", self.ctx.config.RunnerConfig.Seed),
+			"--seed", fmt.Sprintf("%v", seed),
 			"--tapj-sink", address,
 		}, filterArgs...)); err != nil {
 		self.ctx.srv.Cancel(address)

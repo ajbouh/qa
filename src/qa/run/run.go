@@ -15,7 +15,7 @@ import (
 )
 
 type Env struct {
-	Seed              int
+	SeedFn            func(repetition int) int
 	SuiteLabel        string
 	SuiteCoderef      string
 	WorkerEnvs        []map[string]string
@@ -25,6 +25,7 @@ type Env struct {
 	TestRunnerVisitor func(testRunner runner.TestRunner, lastRunner bool) error
 	Memprofile        string
 	Heapdump          string
+	Runs              int
 }
 
 var defaultGlobs = map[string]string{
@@ -87,7 +88,7 @@ func Run(env *Env) (bool, error) {
 		}
 		defer ctx.Close()
 
-		traceEvents, runners, err := ctx.EnumerateRunners()
+		traceEvents, runners, err := ctx.EnumerateRunners(env.SeedFn(0))
 		if err != nil {
 			return false, err
 		}
@@ -115,22 +116,43 @@ func Run(env *Env) (bool, error) {
 		}
 	}
 
-	suiteEvent := tapjio.NewSuiteBeginEvent(startTime, count, env.Seed)
-	suiteEvent.Label = env.SuiteLabel
-	suiteEvent.Coderef = env.SuiteCoderef
-	err := visitor.SuiteBegin(*suiteEvent)
-	if err != nil {
-		return false, err
-	}
+	var err error
+	passed := true
 
-	final := *tapjio.NewSuiteFinishEvent(suiteEvent)
-	err = runner.RunAll(visitor, env.WorkerEnvs, final.Counts, testRunners)
+	for runNo := 1; runNo <= env.Runs; runNo++ {
+		if runNo > 1 {
+			startTime = time.Now().UTC()
+		}
 
-	final.Time = time.Now().UTC().Sub(startTime).Seconds()
+		seed := env.SeedFn(runNo)
+		suiteEvent := tapjio.NewSuiteBeginEvent(startTime, count, seed)
+		suiteEvent.Label = env.SuiteLabel
+		suiteEvent.Coderef = env.SuiteCoderef
+		err = visitor.SuiteBegin(*suiteEvent)
+		if err != nil {
+			return false, err
+		}
 
-	finalErr := visitor.SuiteFinish(final)
-	if err == nil {
-		err = finalErr
+		final := *tapjio.NewSuiteFinishEvent(suiteEvent)
+		err = runner.RunAll(visitor, env.WorkerEnvs, final.Counts, seed, testRunners)
+		if !final.Passed() {
+			passed = false
+		}
+
+		if err != nil {
+			break
+		}
+
+		final.Time = time.Now().UTC().Sub(startTime).Seconds()
+
+		finalErr := visitor.SuiteFinish(final)
+		if err == nil {
+			err = finalErr
+		}
+
+		if err != nil {
+			break
+		}
 	}
 
 	if env.Memprofile != "" {
@@ -155,12 +177,8 @@ func Run(env *Env) (bool, error) {
 	}
 
 	if err != nil {
-		return false, err
+		return passed, err
 	}
 
-	if !final.Passed() {
-		return false, nil
-	}
-
-	return true, nil
+	return passed, nil
 }

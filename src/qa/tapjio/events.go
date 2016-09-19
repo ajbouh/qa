@@ -295,6 +295,15 @@ type ResultTally struct {
 	Todo  int `json:"todo"`
 }
 
+func (r *ResultTally) IncrementAll(other *ResultTally) {
+	r.Total += other.Total
+	r.Pass += other.Pass
+	r.Fail += other.Fail
+	r.Error += other.Error
+	r.Omit += other.Omit
+	r.Todo += other.Todo
+}
+
 func (r *ResultTally) Increment(status Status) {
 	r.Total += 1
 
@@ -351,10 +360,6 @@ type Visitor interface {
 	TestFinish(test TestFinishEvent) error
 	SuiteFinish(final SuiteFinishEvent) error
 	End(reason error) error
-}
-
-type multiVisitor struct {
-	visitors []Visitor
 }
 
 func MultiVisitor(visitors []Visitor) Visitor {
@@ -557,6 +562,7 @@ func Decode(decoder *json.Decoder, visitor Visitor) (err error) {
 			incrementValue(countsByEventType, se.Type, 1)
 			currentSuite = se
 			err = visitor.SuiteBegin(*currentSuite)
+			currentCases = nil
 		case *CaseEvent:
 			ce, _ := event.(*CaseEvent)
 			incrementValue(byteCountsByEventType, ce.Type, len(b))

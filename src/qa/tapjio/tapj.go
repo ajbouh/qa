@@ -24,6 +24,7 @@ func (t *tapj) TraceEvent(event TraceEvent) error {
 }
 
 func (t *tapj) SuiteBegin(event SuiteBeginEvent) error {
+	t.currentCases = nil
 	return t.encoder.Encode(event)
 }
 

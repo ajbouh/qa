@@ -15,6 +15,7 @@ import (
 
 type executionFlags struct {
 	jobs                *int
+	runs                *int
 	squashPolicy        *runner.SquashPolicy
 	listenNetwork       *string
 	listenAddress       *string
@@ -77,6 +78,7 @@ func defineExecutionFlags(flags *flag.FlagSet) *executionFlags {
 	return &executionFlags{
 		seed:                flags.Int("seed", -1, "Set seed to use"),
 		jobs:                flags.Int("jobs", runtime.NumCPU(), "Set number of jobs"),
+		runs:                flags.Int("runs", 1, "Set number of times to run tests"),
 		squashPolicy:        squashPolicyValue.value,
 		listenNetwork:       flags.String("listen-network", "unix", "Specify unix or tcp socket for worker coordination"),
 		listenAddress:       flags.String("listen-address", "/tmp/qa", "Listen address for worker coordination"),
@@ -111,7 +113,6 @@ func (f *executionFlags) NewRunnerConfig(env *cmd.Env, runnerName string, patter
 	return runner.Config{
 		Name:         runnerName,
 		FileLister:   runner.NewFileGlob(env.Dir, patterns),
-		Seed:         *f.seed,
 		Dir:          env.Dir,
 		EnvVars:      env.Vars,
 		SquashPolicy: *f.squashPolicy,

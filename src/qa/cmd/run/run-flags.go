@@ -74,14 +74,6 @@ func (f *runFlags) ApplyImpliedDefaults() {
 		*executionFlags.sampleStack = true
 	}
 
-	if *executionFlags.seed == -1 {
-		bigSeed, err := rand.Int(rand.Reader, big.NewInt(65535))
-		if err != nil {
-			panic(err)
-		}
-		*executionFlags.seed = int(bigSeed.Int64())
-	}
-
 	if *f.watch {
 		f.SetShowSnails(false)
 		f.SetShowUpdatingSummary(false)
@@ -100,7 +92,8 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerConfigs []runner.Config) (*run.Env
 	executionFlags := *f.executionFlags
 	outputFlags := *f.outputFlags
 
-	svgTitleSuffix := fmt.Sprintf(" — jobs = %d, runnerSpecs = %#v", *executionFlags.jobs, runnerConfigs)
+	svgTitleSuffix := fmt.Sprintf(" — jobs = %d, runs = %d, runnerSpecs = %#v",
+			*executionFlags.jobs, *executionFlags.runs, runnerConfigs)
 
 	e := f.cloneAndAdjustEnv(env)
 	visitor, err := outputFlags.newVisitor(e, *executionFlags.jobs, svgTitleSuffix)
@@ -114,9 +107,20 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerConfigs []runner.Config) (*run.Env
 	}
 
 	return &run.Env{
-		Seed:          *executionFlags.seed,
+		SeedFn:        func (repetition int) int {
+			if *executionFlags.seed != -1 {
+				return *executionFlags.seed
+			}
+
+			bigSeed, err := rand.Int(rand.Reader, big.NewInt(65535))
+			if err != nil {
+				panic(err)
+			}
+			return int(bigSeed.Int64())
+		},
 		SuiteLabel:    *f.suiteLabel,
 		SuiteCoderef:  *f.suiteCoderef,
+		Runs:          *executionFlags.runs,
 		Memprofile:    *f.memprofile,
 		Heapdump:      *f.heapdump,
 		WorkerEnvs:    executionFlags.WorkerEnvs(),

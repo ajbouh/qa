@@ -98,6 +98,7 @@ func (self *Pretty) SuiteBegin(suite tapjio.SuiteBeginEvent) error {
 	self.timeCop = &analysis.TimeCop{MaxResults: 10}
 	self.tally = &tapjio.ResultTally{}
 
+	self.totalTestTime = 0
 	self.totalTests = suite.Count
 	self.seed = suite.Seed
 	self.startTime = time.Now()
