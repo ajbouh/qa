@@ -20,7 +20,7 @@ func qaFlaky(args ...string) (interface{}, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	env := &cmd.Env{Stdout: &stdout, Stderr: &stderr}
-	err := flaky.Main(env, args)
+	err := flaky.Main(env, append([]string{"flaky"}, args...))
 	if err != nil {
 		return nil, fmt.Errorf("error running with %v (%v): %v", args, err, stderr.String())
 	}
@@ -40,7 +40,8 @@ func TestDetectFlaky(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	qaRunArgs := []string{
+	qaRunArgv := []string{
+		"qa run",
 		"-suite-label", "my-flaky-suite",
 		"-suite-coderef", "r1",
 		"-archive-base-dir", dir,
@@ -64,22 +65,22 @@ func TestDetectFlaky(t *testing.T) {
 	env.Vars["QA_FLAKY_2"] = "false"
 	env.Vars["QA_FLAKY_TYPE"] = "error"
 	// Expect two flaky (error) fails for each test type.
-	run.Main(env, qaRunArgs)
-	run.Main(env, qaRunArgs)
+	run.Main(env, qaRunArgv)
+	run.Main(env, qaRunArgv)
 	env.Vars["QA_FLAKY_TYPE"] = "assert"
 	// Expect one flaky (assertion) fail for each test type
-	run.Main(env, qaRunArgs)
+	run.Main(env, qaRunArgv)
 	env.Vars["QA_FLAKY_1"] = "false"
 	env.Vars["QA_FLAKY_2"] = "false"
 	// Expect this entire run to pass.
-	run.Main(env, qaRunArgs)
+	run.Main(env, qaRunArgv)
 	env.Vars["QA_FLAKY_1"] = "false"
 	env.Vars["QA_FLAKY_2"] = "true"
 	// Expect a different kind of flaky (assertion) fail for each test type
-	run.Main(env, qaRunArgs)
-	qaRunArgs[3] = "r2"
+	run.Main(env, qaRunArgv)
+	qaRunArgv[4] = "r2"
 	// Expect a failure similar to above, but still counted with r1.
-	run.Main(env, qaRunArgs)
+	run.Main(env, qaRunArgv)
 
 	gotSummary, err := qaFlaky("-archive-base-dir", dir, "-format", "json", "-show-aces=false")
 	if err != nil {

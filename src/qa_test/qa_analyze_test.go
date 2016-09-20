@@ -42,7 +42,7 @@ func qaGrouping(input []interface{}, args ...string) ([]interface{}, error) {
 	var stderr bytes.Buffer
 	var err error
 	env := &cmd.Env{Stdout: &stdout, Stderr: &stderr, Stdin: bytes.NewBuffer(stdin.Bytes())}
-	if err = grouping.Main(env, args); err != nil {
+	if err = grouping.Main(env, append([]string{"group"}, args...)); err != nil {
 		return nil, fmt.Errorf("error running with %v (%v): %v", args, err, stderr.String())
 	}
 
@@ -142,7 +142,7 @@ func qaDiscover(args ...string) ([]interface{}, error) {
 	var stderr bytes.Buffer
 	var err error
 	env := &cmd.Env{Stdout: &stdout, Stderr: &stderr}
-	if err = discover.Main(env, args); err != nil {
+	if err = discover.Main(env, append([]string{"discover"}, args...)); err != nil {
 		return nil, fmt.Errorf("error running with %v (%v): %v", args, err, stderr.String())
 	}
 
@@ -166,7 +166,7 @@ func qaSummary(input []interface{}, args ...string) ([]map[string](interface{}),
 	var stderr bytes.Buffer
 	var err error
 	env := &cmd.Env{Stdout: &stdout, Stderr: &stderr, Stdin: bytes.NewBuffer(stdin.Bytes())}
-	if err = summary.Main(env, args); err != nil {
+	if err = summary.Main(env, append([]string{"summary"}, args...)); err != nil {
 		return nil, fmt.Errorf("error running with %v (%v): %v", args, err, stderr.String())
 	}
 

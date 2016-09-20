@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"qa/cmd"
 	"qa/tapjio"
 )
 
@@ -29,10 +30,10 @@ func decodeStacktrace(path string, def io.ReadCloser, writer io.Writer) error {
 //     stackcollapse in.tapj
 //     stackcollapse in.tapj stackcollapse.txt
 
-func Main(args []string) error {
-	flags := flag.NewFlagSet("stackcollapse", flag.ContinueOnError)
+func Main(env *cmd.Env, argv []string) error {
+	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
-	err := flags.Parse(args)
+	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}
@@ -42,6 +43,7 @@ func Main(args []string) error {
 
 	var writer io.WriteCloser
 
+	args := flags.Args()
 	switch {
 	case len(args) == 1:
 		input = args[0]

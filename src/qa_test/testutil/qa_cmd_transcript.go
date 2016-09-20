@@ -77,7 +77,7 @@ func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, arg
 	errCh := make(chan error, 2)
 	go func() {
 		env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: &stderrBuf, Dir: dir}
-		errCh <- fn(env, args)
+		errCh <- fn(env, append([]string{"cmd"}, args...))
 
 		wr.Close()
 	}()

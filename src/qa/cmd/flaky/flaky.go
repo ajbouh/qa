@@ -17,7 +17,7 @@ import (
 
 type pipelineOp struct {
 	main func(*cmd.Env, []string) error
-	args []string
+	argv []string
 }
 
 func runPipeline(env *cmd.Env, ops []pipelineOp) error {
@@ -53,7 +53,7 @@ func runPipeline(env *cmd.Env, ops []pipelineOp) error {
 			if closer != nil {
 				defer closer.Close()
 			}
-			errChan <- op.main(opEnv, op.args)
+			errChan <- op.main(opEnv, op.argv)
 		}(opEnv, op, closer)
 	}
 
@@ -82,8 +82,8 @@ func runPipeline(env *cmd.Env, ops []pipelineOp) error {
 	return fmt.Errorf("Pipeline failed: %v", errs)
 }
 
-func Main(env *cmd.Env, args []string) error {
-	flags := flag.NewFlagSet("flaky", flag.ContinueOnError)
+func Main(env *cmd.Env, argv []string) error {
+	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
 	usr, err := user.Current()
 	if err != nil {
@@ -101,7 +101,7 @@ func Main(env *cmd.Env, args []string) error {
 	now := time.Now()
 	untilDate := flags.String("until-date", now.Format("2006-01-02"), "Date (YYYY-MM-DD) to search -archive-base-dir backwards from")
 
-	err = flags.Parse(args)
+	err = flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,8 @@ func Main(env *cmd.Env, args []string) error {
 		[]pipelineOp{
 			pipelineOp{
 				main: discover.Main,
-				args: []string{
+				argv: []string{
+					"qa flaky",
 					"--dir", *archiveBaseDir,
 					"--number-days", strconv.Itoa(*numDays),
 					"--until-date", *untilDate,
@@ -126,7 +127,7 @@ func Main(env *cmd.Env, args []string) error {
 			},
 			// pipelineOp{
 			// 	main: grouping.Main,
-			// 	args: []string{
+			// 	argv: []string{
 			// 		"--collapse-id", *collapseId,
 			// 		"--keep-if-any", "status==\"fail\"",
 			// 		"--keep-if-any", "status==\"error\"",
@@ -134,7 +135,8 @@ func Main(env *cmd.Env, args []string) error {
 			// },
 			pipelineOp{
 				main: grouping.Main,
-				args: []string{
+				argv: []string{
+					"qa group",
 					"--collapse-id", *filterCollapseId,
 					"--keep-if-any", "status==\"pass\"",
 					"--keep-residual-records-matching-kept", "outcome-digest",
@@ -142,7 +144,8 @@ func Main(env *cmd.Env, args []string) error {
 			},
 			pipelineOp{
 				main: summary.Main,
-				args: []string{
+				argv: []string{
+					"qa summary",
 					"--format", *format,
 					acesArg,
 					"--duration", "time",

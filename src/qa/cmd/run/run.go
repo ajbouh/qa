@@ -137,11 +137,11 @@ func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
 	return &cmd.QuietError{1}
 }
 
-func Main(env *cmd.Env, args []string) error {
-	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+func Main(env *cmd.Env, argv []string) error {
+	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
 	f := DefineFlags(flags)
-	err := flags.Parse(args)
+	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}
@@ -156,11 +156,11 @@ func Main(env *cmd.Env, args []string) error {
 	return gogogo(env, runEnv, f.Watch())
 }
 
-func Framework(frameworkName string, env *cmd.Env, args []string) error {
-	flags := flag.NewFlagSet(frameworkName, flag.ContinueOnError)
+func Framework(frameworkName string, env *cmd.Env, argv []string) error {
+	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
 	f := DefineFlags(flags)
-	err := flags.Parse(args)
+	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,6 @@ import (
 	"qa/cmd"
 )
 
-func Main(env *cmd.Env, args []string) error {
-	return analysis.RunRuby(env, "tapj-summary.rb", args...)
+func Main(env *cmd.Env, argv []string) error {
+	return analysis.RunRuby(env, "tapj-summary.rb", argv[1:]...)
 }

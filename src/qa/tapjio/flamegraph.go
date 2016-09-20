@@ -53,13 +53,11 @@ func emitSupportAsset(assetName string) (string, error) {
 }
 
 // GenerateFlameGraph runs the flamegraph script to generate a flame graph SVG.
-func GenerateFlameGraph(stacktraceReader io.Reader, writer io.WriteCloser, args ...string) error {
+func GenerateFlameGraph(stacktraceReader io.Reader, writer io.Writer, args ...string) error {
 	flamegraphPl, err := emitSupportAsset("flamegraph.pl")
 	if err != nil {
 		return err
 	}
-
-	defer writer.Close()
 
 	cmd := exec.Command("perl", append([]string{flamegraphPl}, args...)...)
 	cmd.Stdin = stacktraceReader

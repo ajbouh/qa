@@ -217,6 +217,7 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 				}
 
 				stacktracesFile.Seek(0, 0)
+				defer stacktracesFile.Close()
 				err = tapjio.GenerateFlameGraph(
 					stacktracesFile,
 					flamegraphFile,
@@ -257,6 +258,7 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 				}
 
 				stacktracesFile.Seek(0, 0)
+				defer stacktracesFile.Close()
 				err = tapjio.GenerateFlameGraph(
 					stacktracesFile,
 					icegraphFile,

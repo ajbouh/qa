@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 
+	"qa/cmd"
 	"qa/tapjio"
 )
 
@@ -32,10 +33,10 @@ func decodeStacktrace(path string, def io.ReadCloser, writer io.Writer) error {
 //     flamegraph in.tapj out.svg [ -- ... ]
 //     flamegraph in1.tapj in2.tapj out.svg [ -- ... ]
 
-func Main(args []string) error {
-	flags := flag.NewFlagSet("flamegraph", flag.ContinueOnError)
+func Main(env *cmd.Env, argv []string) error {
+	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
-	err := flags.Parse(args)
+	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}
@@ -58,7 +59,7 @@ func Main(args []string) error {
 	diffInputA := ""
 	diffInputB := ""
 
-	var writer io.WriteCloser
+	var writer io.Writer
 
 	switch {
 	case len(remainingArgs) == 1:
@@ -73,6 +74,7 @@ func Main(args []string) error {
 		output = remainingArgs[2]
 	}
 
+	stdinCloser := ioutil.NopCloser(env.Stdin)
 	var stacktraceBytes bytes.Buffer
 	if diffInputA != "" || diffInputB != "" {
 		stacktraceAFile, err := ioutil.TempFile("", "stacktrace")
@@ -86,13 +88,13 @@ func Main(args []string) error {
 		}
 		defer os.Remove(stacktraceBFile.Name())
 
-		if err := decodeStacktrace(diffInputA, os.Stdin, stacktraceAFile); err != nil {
+		if err := decodeStacktrace(diffInputA, stdinCloser, stacktraceAFile); err != nil {
 			return err
 		}
 		if err := stacktraceAFile.Close(); err != nil {
 			return err
 		}
-		if err := decodeStacktrace(diffInputB, os.Stdin, stacktraceBFile); err != nil {
+		if err := decodeStacktrace(diffInputB, stdinCloser, stacktraceBFile); err != nil {
 			return err
 		}
 		if err := stacktraceBFile.Close(); err != nil {
@@ -106,19 +108,21 @@ func Main(args []string) error {
 			return err
 		}
 	} else {
-		if err := decodeStacktrace(input, os.Stdin, &stacktraceBytes); err != nil {
+		if err := decodeStacktrace(input, stdinCloser, &stacktraceBytes); err != nil {
 			return err
 		}
 	}
 
 	if output == "-" {
-		writer = os.Stdout
+		writer = env.Stdout
 	} else {
-		writer, err = os.Create(output)
+		var file *os.File
+		file, err = os.Create(output)
 		if err != nil {
 			return err
 		}
-		defer writer.Close()
+		writer = file
+		defer file.Close()
 	}
 
 	err = tapjio.GenerateFlameGraph(bytes.NewReader(stacktraceBytes.Bytes()), writer, flamegraphArgs...)
