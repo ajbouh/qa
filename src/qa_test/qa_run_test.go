@@ -122,23 +122,23 @@ func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
 	require.NoError(t, err, "%v. Invalid suite start time: %s", ix, suiteEvent.Start)
 
 	require.InDelta(t,
-			startingTime.UnixNano(),
-			suiteStartTime.UnixNano(),
-			(duration.Seconds() + 1) * 1e9, // Add 1 second to avoid issues with time resolution
-			"%v. Suite time (%v) too far from current time (%v)", ix, suiteStartTime, startingTime)
+		startingTime.UnixNano(),
+		suiteStartTime.UnixNano(),
+		(duration.Seconds()+1)*1e9, // Add 1 second to avoid issues with time resolution
+		"%v. Suite time (%v) too far from current time (%v)", ix, suiteStartTime, startingTime)
 
 	// Expect enough test events, all should have a time ≥ when we started qa
 	require.Equal(t, test.tally.Total, len(tscript.TestBeginEvents),
-			"%v. Wrong number of test begin events.", ix)
+		"%v. Wrong number of test begin events.", ix)
 	for _, testEvent := range tscript.TestBeginEvents {
 		require.Equal(t, true, testEvent.Timestamp >= float64(startingTime.Unix()),
-				"%v. Test timestamp (%v) should be on or after initial time (%v).", ix, testEvent.Timestamp, startingTime)
+			"%v. Test timestamp (%v) should be on or after initial time (%v).", ix, testEvent.Timestamp, startingTime)
 	}
 
 	require.Equal(t, test.tally.Total, len(tscript.TestFinishEvents), "Wrong number of test events.")
 	for _, testEvent := range tscript.TestFinishEvents {
 		require.Equal(t, true, testEvent.Time <= duration.Seconds(),
-				"%v. Test duration (%v) should be less than or equal to the total duration (%v).", ix, testEvent.Time, duration)
+			"%v. Test duration (%v) should be less than or equal to the total duration (%v).", ix, testEvent.Time, duration)
 	}
 
 	require.Equal(t,

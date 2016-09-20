@@ -46,7 +46,7 @@ func qaWatch(quitCh chan struct{}, c chan<- *testutil.Transcript, dir string, ar
 
 	rd, wr := io.Pipe()
 	go func() {
-		<- quitCh
+		<-quitCh
 		wr.Close()
 	}()
 	_, err := testutil.RunQaCmd(run.Main, visitor, rd, dir, args)
@@ -67,7 +67,7 @@ func removeDir(t *testing.T, dir, subpath string) {
 	removeFile(t, dir, ".git/index.lock")
 }
 
-func removeFiles(t *testing.T, dir string, subpaths ... string) {
+func removeFiles(t *testing.T, dir string, subpaths ...string) {
 	writeFile(t, dir, ".git/index.lock", "")
 
 	for _, subpath := range subpaths {
@@ -193,14 +193,14 @@ func TestWatch(t *testing.T) {
 	source = `NotARealConstant`
 	expect = map[string]tapjio.Status{
 		filepath.Join(dir, "rspec/nested/overly_eager_spec.rb"): tapjio.Error,
-		filepath.Join(dir, "rspec/nested/new_spec.rb"): tapjio.Error,
+		filepath.Join(dir, "rspec/nested/new_spec.rb"):          tapjio.Error,
 	}
 	writeFileAndAwaitResult(t, dir, "rspec/nested/rel_foobazbar.rb", source, c, expect)
 
 	// Modify library
 	source = `puts "hi"`
 	expect = map[string]tapjio.Status{
-		"eventually passes": tapjio.Pass,
+		"eventually passes":  tapjio.Pass,
 		"immediately passes": tapjio.Pass,
 	}
 	writeFileAndAwaitResult(t, dir, "rspec/nested/rel_foobazbar.rb", source, c, expect)
@@ -208,13 +208,13 @@ func TestWatch(t *testing.T) {
 	removeFiles(t, dir, "rspec/nested/rel_foobazbar.rb")
 	expect = map[string]tapjio.Status{
 		filepath.Join(dir, "rspec/nested/overly_eager_spec.rb"): tapjio.Error,
-		filepath.Join(dir, "rspec/nested/new_spec.rb"): tapjio.Error,
+		filepath.Join(dir, "rspec/nested/new_spec.rb"):          tapjio.Error,
 	}
 	awaitResult(t, c, expect)
 
 	source = `puts "hi"`
 	expect = map[string]tapjio.Status{
-		"eventually passes": tapjio.Pass,
+		"eventually passes":  tapjio.Pass,
 		"immediately passes": tapjio.Pass,
 	}
 	writeFileAndAwaitResult(t, dir, "rspec/nested/rel_foobazbar.rb", source, c, expect)
@@ -237,8 +237,8 @@ func TestWatch(t *testing.T) {
 	source = `require_relative '../../lib/lurking_lib.rb'; RSpec.describe("Pass") { it("passes upon its dep being renamed properly") { expect(0).to eq 0 } }`
 	writeFile(t, dir, "rspec2/lurking/lurking_spec.rb", source)
 	renameFile(t,
-			filepath.Join(dir, "rspec2/lurking"),
-			filepath.Join(dir, "rspec/lurking"))
+		filepath.Join(dir, "rspec2/lurking"),
+		filepath.Join(dir, "rspec/lurking"))
 	expect = map[string]tapjio.Status{
 		filepath.Join(dir, "rspec/lurking/lurking_spec.rb"): tapjio.Error,
 	}
@@ -255,8 +255,8 @@ func TestWatch(t *testing.T) {
 	awaitResult(t, c, expect)
 
 	renameFile(t,
-			filepath.Join(dir, "lib/lurking_lib.rb"),
-			filepath.Join(dir, "lib/lurking_lib2.rb"))
+		filepath.Join(dir, "lib/lurking_lib.rb"),
+		filepath.Join(dir, "lib/lurking_lib2.rb"))
 	expect = map[string]tapjio.Status{
 		filepath.Join(dir, "rspec/lurking/lurking_spec.rb"): tapjio.Error,
 	}
@@ -296,7 +296,7 @@ RSpec.describe("Pass") do
 	end
 end`
 	expect = map[string]tapjio.Status{
-		"tests a runtime require": tapjio.Pass,
+		"tests a runtime require":       tapjio.Pass,
 		"tests another runtime require": tapjio.Pass,
 	}
 	writeFileAndAwaitResult(t, dir, "rspec/multi/multi_spec.rb", source, c, expect)
@@ -340,7 +340,7 @@ RSpec.describe("Pass") do
 	end
 end`
 	expect = map[string]tapjio.Status{
-		"tests a runtime require": tapjio.Pass,
+		"tests a runtime require":   tapjio.Pass,
 		"tests a runtime require 3": tapjio.Pass,
 	}
 	writeFileAndAwaitResult(t, dir, "rspec/multi/multi_spec.rb", source, c, expect)

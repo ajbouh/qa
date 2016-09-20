@@ -11,11 +11,11 @@ import (
 type Transcript struct {
 	Stderr            string
 	Events            []interface{}
-	SuiteBeginEvents       []tapjio.SuiteBeginEvent
-	TestFinishEvents        []tapjio.TestFinishEvent
-	TestBeginEvents []tapjio.TestBeginEvent
+	SuiteBeginEvents  []tapjio.SuiteBeginEvent
+	TestFinishEvents  []tapjio.TestFinishEvent
+	TestBeginEvents   []tapjio.TestBeginEvent
 	TraceEvents       []tapjio.TraceEvent
-	SuiteFinishEvents       []tapjio.SuiteFinishEvent
+	SuiteFinishEvents []tapjio.SuiteFinishEvent
 }
 
 func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
@@ -52,18 +52,19 @@ func NewTranscriptBuilder() (*Transcript, tapjio.Visitor) {
 type QaCmd func(*cmd.Env, []string) error
 
 type buffer struct {
-    b bytes.Buffer
-    m sync.Mutex
+	b bytes.Buffer
+	m sync.Mutex
 }
+
 func (b *buffer) Write(p []byte) (n int, err error) {
-    b.m.Lock()
-    defer b.m.Unlock()
-    return b.b.Write(p)
+	b.m.Lock()
+	defer b.m.Unlock()
+	return b.b.Write(p)
 }
 func (b *buffer) String() string {
-    b.m.Lock()
-    defer b.m.Unlock()
-    return b.b.String()
+	b.m.Lock()
+	defer b.m.Unlock()
+	return b.b.String()
 }
 
 func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, args []string) (stderr string, err error) {
@@ -75,7 +76,7 @@ func RunQaCmd(fn QaCmd, visitor tapjio.Visitor, stdin io.Reader, dir string, arg
 
 	errCh := make(chan error, 2)
 	go func() {
-    env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: &stderrBuf, Dir: dir}
+		env := &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: &stderrBuf, Dir: dir}
 		errCh <- fn(env, args)
 
 		wr.Close()

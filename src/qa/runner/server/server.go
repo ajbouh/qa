@@ -385,6 +385,6 @@ func (s *Server) ExposeChannel() (string, chan interface{}, chan error, error) {
 		address := fmt.Sprintf("%s@%s", token, s.listener.Addr().String())
 		return address, ch, errChan, nil
 	} else {
-		return "", nil, nil, fmt.Errorf("Server is not running; can't expose a channel",)
+		return "", nil, nil, fmt.Errorf("Server is not running; can't expose a channel")
 	}
 }
