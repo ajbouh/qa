@@ -47,6 +47,14 @@ Qa works with your existing rspec, minitest, or test-unit tests.
   s.homepage    = 'https://github.com/ajbouh/qa'
   s.license     = 'MIT'
   s.required_ruby_version = '>= 2.1.0'
+
+
+  s.add_runtime_dependency 'binding_of_caller', '~> 0.7'
+  s.add_runtime_dependency 'pry', '~> 0.10'
+  s.add_runtime_dependency 'pry-remote', '~> 0.1'
+  s.add_runtime_dependency 'pry-stack_explorer', '~> 0.4'
+  s.add_runtime_dependency 'pry-theme', '~> 1.1'
+
 end
 
 EOF

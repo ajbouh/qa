@@ -119,7 +119,7 @@ func Main(env *cmd.Env, argv []string) error {
 func main() {
 	var status int
 
-	env := &cmd.Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+	env := cmd.OsEnv()
 	err := Main(env, os.Args)
 
 	if err != nil {

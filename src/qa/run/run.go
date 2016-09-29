@@ -130,7 +130,7 @@ func Run(env *Env) (bool, error) {
 		suiteEvent.Coderef = env.SuiteCoderef
 		err = visitor.SuiteBegin(*suiteEvent)
 		if err != nil {
-			return false, err
+			return false, visitEnd(visitor, err)
 		}
 
 		final := *tapjio.NewSuiteFinishEvent(suiteEvent)
@@ -177,8 +177,17 @@ func Run(env *Env) (bool, error) {
 	}
 
 	if err != nil {
-		return passed, err
+		return passed, visitEnd(visitor, err)
 	}
 
-	return passed, nil
+	return passed, visitEnd(visitor, nil)
+}
+
+func visitEnd(visitor tapjio.Visitor, reason error) error {
+	err := visitor.End(reason)
+	if reason == nil {
+		return err
+	}
+
+	return reason
 }

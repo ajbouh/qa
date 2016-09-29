@@ -196,6 +196,10 @@ func (t *stacktraceEmitter) TraceEvent(event TraceEvent) error {
 	return nil
 }
 
+func (t *stacktraceEmitter) AwaitAttach(event AwaitAttachEvent) error {
+	return nil
+}
+
 func (t *stacktraceEmitter) TestBegin(event TestBeginEvent) error {
 	return nil
 }

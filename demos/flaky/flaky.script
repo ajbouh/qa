@@ -3,32 +3,62 @@
 # We'll be using the ruby-mime-types test suite to
 # demonstrate finding flaky tests with qa.
 #
-git remote get-url origin; git reset --hard aa499d1; tree ./test
+git remote get-url origin; git reset --hard b0a4457; tree ./test
 
-#
-# First fix a parallelism bug in the cache tests.
-# Test processes must use separate scratch files.
-#
-git apply ../patches/fix-cache-test-parallelism.patch
-git diff -U2; git add --update
-
-#
-# Break one test so it will never pass, and another
-# test to pass ~25% of the time, fail one way ~50%
-# of the time, and otherwise fail another way.
-#
+# Here we'll introduce test failures, both flaky and non-flaky.
 git apply ../patches/introduce-faults.patch
-git diff -U2; git add --update
 
 #
-# Record enough data for qa to analyze.
-#
-for x in $(seq 12)
-do
-  bundle exec qa run -archive-base-dir=.qa-archive -quiet minitest
-done
+# Let's run the tests many times so qa will have enough data to
+# identify which tests are flaky.
+
+export QA_ARCHIVE=$PWD/.qa-archive
+bundle exec qa minitest -runs 100 -quiet
 
 #
-# Now use qa to find that flaky test!
+# Now use qa to report on the top flaky outcome from the results
+# in $QA_ARCHIVE. The report will show a number for each test,
+# and a letter for each flaky outcome.
+
+bundle exec qa flaky top 1
+
 #
-qa flaky -archive-base-dir=.qa-archive
+# Qa can attempt to reproduce a specific outcome while ignoring
+# others. Let's give that a shot.
+
+bundle exec qa flaky repro 1b
+
+# We're now in a pry session. Pry is like irb, but more
+# sophisticated and extensible. This pry session is running
+# with pry-stack_explorer, which allows us to inspect the
+# stack of the flaky exception we've reproduced.
+#
+
+# Let's double check that assertion manually.
+[mime_types.count, mt.count]
+
+
+# Now dig into the count method using pry.
+mime_types.class
+
+show-source MIME::Types#count
+
+
+#
+# That explains it! Let's remove that (evil!) call to rand...
+
+edit MIME::Types#count
+
+
+exit
+
+#
+# We can use qa to confirm we've fixed the problem.
+bundle exec qa flaky repro 1b
+
+
+#
+# Learn more about how qa can help you write better code, faster:
+# https://github.com/ajbouh/qa
+#
+# Thanks for watching and happy hacking!

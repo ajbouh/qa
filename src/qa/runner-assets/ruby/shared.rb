@@ -295,42 +295,10 @@ class ::Qa::LoadTracking
 end
 
 module ::Qa::Binding
-  begin
-    # From https://github.com/banister/binding_of_caller/issues/57
-    # Thanks to Steve Shreeve <steve.shreeve@gmail.com>
+  require 'binding_of_caller'
 
-    require 'fiddle/import'
-  rescue LoadError
-    class << self
-      def callers
-        []
-      end
-    end
-  else
-    extend Fiddle::Importer
-
-    dlload Fiddle.dlopen(nil)
-
-    DebugStruct = struct [
-      "void* thread",
-      "void* frame",
-      "void* backtrace",
-      "void* contexts",
-      "long  backtrace_size"
-    ]
-
-    extern "void* rb_debug_inspector_open(void*, void*)"
-    bind("void* callback(void*, void*)") do |ptr, _|
-      DebugStruct.new(ptr).contexts
-    end
-
-    class << self
-      def callers
-        list_ptr = rb_debug_inspector_open(self['callback'], nil)
-        list = list_ptr.to_value
-        list.drop(4).map {|ary| ary[2] } # grab proper bindings
-      end
-    end
+  def self.callers
+    binding.callers.drop(1)
   end
 end
 
@@ -1022,19 +990,22 @@ module Qa::TapjExceptions
 
   @@_source_cache = {}
 
-  def summarize_exception(error, backtrace, message=nil)
-    # [
-    #   {
-    #     "file" => "...",
-    #     "method" => "...",
-    #     "line" => N,
-    #     "variables" => {"..." => "", ...}
-    #   },
-    #   ...
-    # ]
+  @@attach_proc = nil
 
+  def set_emit_and_await_attach_proc=(proc)
+    @@attach_proc = proc
+  end
+
+  def maybe_emit_and_await_attach(*args)
+    return unless @@attach_proc
+
+    @@attach_proc.call(*args)
+  end
+
+  MAX_VAR_VALUE_LENGTH = 1024
+  BACKTRACE_ENTRY_PATTERN = /(.+?):(\d+)(?:\:in `(.*)')?/
+  def summarize_exception(error, backtrace, message=nil)
     backtrace_bindings = error.instance_variable_get(:@__qa_caller_bindings)
-    load_path = $LOAD_PATH.map(&:to_s)
 
     unless message
       if error.is_a?(SyntaxError)
@@ -1054,17 +1025,30 @@ module Qa::TapjExceptions
     # eliminate ourselves from the list.
     internal_file_patterns = [
       /-e/,
-      %r%minitest.rb|minitest/%
     ]
-    here = File.realpath(Dir.pwd) + File::SEPARATOR
 
+    internal_gem_patterns = [
+      /(?:\/|^)minitest/,
+      /(?:\/|^)test\/unit/,
+      /(?:\/|^)rspec/,
+    ]
+
+    load_path = $LOAD_PATH.map(&:to_s)
+    here = File.realpath(Dir.pwd) + File::SEPARATOR
+    gem_paths = Gem.path.select { |p| File.exist?(p) }
+    gem_paths = gem_paths.map { |p| [p + File::SEPARATOR, File.realpath(p) + File::SEPARATOR] }.flatten
+
+    frame_index = 0
     backtrace = backtrace.each_with_index.map do |entry, index|
-      entry =~ /(.+?):(\d+)(?:\:in `(.*)')?/ || (next nil)
+      unless entry =~ BACKTRACE_ENTRY_PATTERN
+        next nil
+      end
 
       raw_file = $1
       line = $2.to_i
       method = $3
       block_level = 0
+      user = false
 
       # e.g.: block (2 levels) in run
       if method =~ /^block \((\d+) levels?\) in (.*)$/
@@ -1081,29 +1065,65 @@ module Qa::TapjExceptions
         file = raw_file
       elsif raw_file.start_with?(here)
         file = raw_file.sub(here, './')
-      elsif prefix = load_path.find { |p| raw_file.start_with?(p) }
+      elsif prefix = load_path.find { |p| raw_file[p.length] == '/' && raw_file.start_with?(p) }
         file = raw_file[(prefix.length+1)..-1]
       else
         file = raw_file
       end
 
-      h = {"raw-file" => raw_file, "line" => line, "file" => file}
-      h["method"] = method if method
-      h["block_level"] = block_level if block_level && block_level > 0
-      h["internal"] = internal_file_patterns.any? { |re| re =~ file }
-      if !h["internal"] && backtrace_bindings && b = backtrace_bindings[index]
-        locals = b.eval("local_variables")
-        h['variables'] = Hash[locals.map { |v| [v, b.local_variable_get(v).inspect] }]
+      is_gem_path = gem_paths.any? { |p| File.expand_path(raw_file).start_with?(p) }
+
+      internal = internal_file_patterns.any? { |re| re =~ file } ||
+          (is_gem_path && internal_gem_patterns.any? { |re| re =~ file })
+      h = {
+        'raw-file' => raw_file,
+        'line' => line,
+        'file' => file,
+        'user' => !internal && !is_gem_path,
+        'internal' => internal,
+      }
+      h['method'] = method if method
+      h['block_level'] = block_level if block_level && block_level > 0
+
+      if backtrace_bindings
+        f_ix = frame_index
+
+        b = nil
+        loop do
+          if f_ix >= backtrace_bindings.length
+            b = nil
+            break
+          end
+
+          b = backtrace_bindings[f_ix]
+          break if b && raw_file == b.eval('__FILE__')
+
+          f_ix += 1
+        end
+
+        if !h['internal'] && b
+          frame_index = f_ix
+          locals = b.eval('local_variables')
+          h['variables'] = Hash[
+            locals.map do |var_name|
+              var_value = b.local_variable_get(var_name)
+              var_value_str = var_value.inspect rescue "<internal error during inspect>"
+              [var_name, var_value_str[0...MAX_VAR_VALUE_LENGTH]]
+            end
+          ]
+
+          # h['variables']['__frame_type__'] = b.frame_type
+          # h['variables']['__frame_description__'] = b.frame_description
+          h['frame-index'] = frame_index
+        end
       end
 
       h
     end
 
-    backtrace = filter_backtrace(backtrace)
-
     snippets = {} # {"<path>": {N => "...", ...}, ...}
     backtrace.each do |entry|
-      raw_file, file, line = entry.delete("raw-file"), entry["file"], entry["line"]
+      raw_file, file, line = entry.delete('raw-file'), entry['file'], entry['line']
       snippet = (snippets[file] ||= {})
       snippet.update(code_snippet(raw_file, line))
     end
@@ -1123,15 +1143,6 @@ module Qa::TapjExceptions
     end
 
     h
-  end
-
-  # Clean the backtrace of any reference to test framework itself.
-  def filter_backtrace(bt)
-    new_bt = bt.take_while { |e| !e['internal'] }
-    new_bt = bt.select     { |e| !e['internal'] } if new_bt.empty?
-    new_bt = bt.dup                               if new_bt.empty?
-
-    new_bt
   end
 
   # (number of surrounding lines to show)
@@ -1260,6 +1271,17 @@ class ::Qa::TapjConduit
     flush
   end
 
+  def emit_await_attach(type, host, port)
+    emit(
+        'type' => 'note',
+        'qa:type' => 'test:await',
+        'qa:await:type' => type,
+        'qa:await:host' => host,
+        'qa:await:port' => port)
+
+    flush
+  end
+
   # This method is invoked after the dumping of examples and failures.
   def emit_final_event(duration)
     event = @mutex.synchronize do
@@ -1287,14 +1309,26 @@ class ::Qa::TapjConduit
     end
   end
 
+  def suppress_next_test_event
+    @mutex.synchronize do
+      @suppress_next_test_event = true
+    end
+  end
+
   def emit(event)
     @mutex.synchronize do
       case event['type']
       when 'note'
         if event['qa:type'] == 'test:begin'
           @load_tracking.trap_begin
+          @test_timestamp = event['qa:timestamp']
         end
       when 'test'
+        if @suppress_next_test_event
+          @suppress_next_test_event = false
+          return
+        end
+
         if file = event['file']
           absolute_path = File.expand_path(file)
           missing_files = @missing_file_dependencies[absolute_path] || []
@@ -1333,6 +1367,7 @@ class ::Qa::TapjConduit
           }
         end
 
+        event['timestamp'] = @test_timestamp
         @total_count += 1
 
         case event['status']
@@ -1855,15 +1890,14 @@ class ::Qa::TestEngine
     socket.each_line do |line|
       env, args = JSON.parse(line)
 
-      resume = passthrough['warmup']
-      accept_client(cache, env, args, eval_after_fork, resume, conserved, trace_probes, trace_events)
+      accept_client(cache, env, args, eval_after_fork, passthrough, conserved, trace_probes, trace_events)
 
       # Only pass trace_events along to the first client.
       trace_events.clear
     end
   end
 
-  def accept_client(cache, env, args, eval_after_fork, resume, conserved, trace_probes, trace_events)
+  def accept_client(cache, env, args, eval_after_fork, passthrough, conserved, trace_probes, trace_events)
     p = Process.fork do
       begin
         opt = ::Qa::ClientOptionParser.new
@@ -1926,7 +1960,7 @@ class ::Qa::TestEngine
         end
 
         unless opt.dry_run
-          if resume
+          if passthrough['warmup']
             ::Qa::Warmup::RailsActiveRecord.resume(cache, env)
           end
 
@@ -1937,6 +1971,52 @@ class ::Qa::TestEngine
           tapj_conduit.emit_suite_event(::Qa::Time.now_f, 0, seed)
           tapj_conduit.emit_final_event(0)
         else
+          debug_error_class = passthrough['debugErrorClass']
+          debug_host = passthrough['debugListenHost']
+          case passthrough['debugErrorsWith']
+          when 'pry-remote'
+            require 'pry-remote'
+            ::Qa::TapjExceptions.set_emit_and_await_attach_proc = ->(this, exception, pending) do
+              next nil if debug_error_class && !debug_error_class.empty? && debug_error_class != exception.class.name
+              next nil unless bindings = exception.instance_variable_get(:@__qa_caller_bindings)
+              # next nil unless b = bindings[0]
+
+              server = TCPServer.new(0)
+              port = server.addr[1]
+              server.close
+              if pending
+                tapj_conduit.emit(pending)
+                tapj_conduit.suppress_next_test_event
+              end
+              tapj_conduit.emit_await_attach('pry-remote', debug_host, port)
+
+              # Start with the first non-internal frame, if any.
+              initial_frame = 0
+              pending['exception']['backtrace'].find do |frame|
+                next if frame['internal']
+                initial_frame = frame["frame-index"]
+              end
+
+              ps1, ps2 = Pry::DEFAULT_PROMPT
+              Pry.config.theme = "railscasts"
+              pry_options = {
+                call_stack: bindings.compact,
+                initial_frame: initial_frame,
+                prompt: [
+                  ->(*a) do
+                    ENV['QA_PRY_PS1'] && `2>&1 echo #{ENV['QA_PRY_PS1']}`
+                    ps1.(*a)
+                  end,
+                  ->(*a) do
+                    ENV['QA_PRY_PS2'] && `2>&1 echo #{ENV['QA_PRY_PS2']}`
+                    ps2.(*a)
+                  end,
+                ]
+              }
+              PryRemote::Server.new(this, debug_host, port, pry_options).run
+            end
+          end
+
           @run_tests.call(qa_trace, opt, tapj_conduit, tests)
         end
 

@@ -15,6 +15,8 @@ import (
 )
 
 func qaWatch(quitCh chan struct{}, c chan<- *testutil.Transcript, dir string, args ...string) error {
+	defer close(c)
+
 	var transcriptVisitor tapjio.Visitor
 	var transcript *testutil.Transcript
 	visitor := &tapjio.DecodingCallbacks{
@@ -99,7 +101,8 @@ func writeFile(t *testing.T, dir, basename, content string) {
 }
 
 func awaitResult(t *testing.T, c chan *testutil.Transcript, expectStatuses map[string]tapjio.Status) {
-	transcript, _ := <-c
+	transcript, ok := <-c
+	require.Equal(t, true, ok, "Transcript channel should not be closed.")
 
 	gotStatuses := map[string]tapjio.Status{}
 	for _, event := range transcript.TestFinishEvents {

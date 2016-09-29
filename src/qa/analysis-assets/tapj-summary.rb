@@ -47,7 +47,6 @@ module Statistics
       "min" => p.call(sorted_hash_array[0]),
       "median" => percentile(sorted_hash_array, 0.5, &p),
       "max" => p.call(sorted_hash_array[-1]),
-      "count" => hash_array.length
     }
   end
 end
@@ -76,6 +75,18 @@ class Summarizer
     @subgroup_by_proc = nil
   end
 
+  # Based on https://arxiv.org/pdf/1105.1486v1.pdf
+  def estimate_probability(count, total)
+    (count.to_f + 1.0) / (total.to_f + 2.0)
+  end
+
+  def min_runs_needed_to_probably_repro(pr_of_single_repro, pr_of_eventual_repro)
+    pr_of_never_repro = 1.0 - pr_of_eventual_repro
+    pr_of_single_repro_fail = 1.0 - pr_of_single_repro
+
+    Math.log(pr_of_never_repro, pr_of_single_repro_fail).ceil
+  end
+
   # Calculates stats from test observations.
   # Returns an updated test summary which includes a summary object.
   # The summary object is keyed by outcome (which may include exception
@@ -98,9 +109,19 @@ class Summarizer
 
     test_summaries.each do |summary|
       observations = summary.delete("observations")
+      total_count = observations.length
+      total_duration = observations.inject(0.0) { |sum, obs| sum + @duration_proc.call(obs) }
+      mean_duration = total_duration.to_f / total_count.to_f
+      summary["total-count"] = total_count
+      summary["total-duration"] = total_duration
+      summary["pass-count"] = observations.count(&@success_if_proc)
+      summary["fail-count"] = total_count - summary["pass-count"]
 
       # This dictates how we group test results
       groups = observations.group_by(&@subgroup_by_proc)
+
+      expected_run_dur_num = 0
+      expected_run_dur_den = 0
 
       groups.each do |outcome_digest, obs_array|
         set_summary_value = ->(k, v) do
@@ -109,14 +130,25 @@ class Summarizer
 
         # Assume sampling the "prototype" observation for each group
         # is adequate.
-        prototype = obs_array[0]
-        set_summary_value.("status", prototype['status'])
-        set_summary_value.("file", prototype['file'])
-        set_summary_value.("line", prototype['line'])
+        prototype = obs_array.max { |a, b| (a["timestamp"] || 0) <=> (b["timestamp"] || 0) }
         set_summary_value.("prototype", prototype)
-        set_summary_value.("exception", prototype['exception'])
+        set_summary_value.("status", prototype['status'])
 
-        Statistics.run_maths(obs_array, &@duration_proc).each do |k, v|
+        count = obs_array.length
+        set_summary_value.("count", count)
+        pr = estimate_probability(count, total_count)
+
+        limit_repro_pr = 0.999
+
+        set_summary_value.("probability", pr)
+        set_summary_value.("repro-limit-probability", limit_repro_pr)
+        set_summary_value.("repro-run-limit", min_runs_needed_to_probably_repro(pr, limit_repro_pr))
+
+        stats = Statistics.run_maths(obs_array, &@duration_proc)
+        expected_run_dur_num += stats['mean'] * pr
+        expected_run_dur_den += pr
+
+        stats.each do |k, v|
           begin
             set_summary_value.(k, v)
           rescue
@@ -124,16 +156,36 @@ class Summarizer
             raise
           end
         end
+
       end
+
       summary["outcome-digests"] = groups.keys
       summary["outcome-digests"].sort_by! do |outcome_digest|
         summary["count"][outcome_digest]
       end.reverse!
+      # Assign outcome indices in sorted order.
+      outcome_indices = Hash.new { |h, k| h[k] = (OUTCOME_INDICES[h.size] || "!") }
+      summary["outcome-digests"].each do |outcome_digest|
+        next if outcome_digest == "pass"
+        outcome_indices[outcome_digest]
+      end
+      summary["outcome-index"] = outcome_indices
+
+      expected_run_duration = expected_run_dur_num.to_f / expected_run_dur_den.to_f
+
+      groups.each_key do |outcome_digest|
+        set_summary_value = ->(k, v) do
+          (summary[k] ||= {})[outcome_digest] = v
+        end
+
+        get_summary_value = ->(k) { summary[k][outcome_digest] }
+
+        repro_runs = get_summary_value.("repro-run-limit")
+        set_summary_value.("repro-limit-expected-duration", expected_run_duration * repro_runs)
+      end
 
       # Indent a little, then print a single letter for each observation
       outcomes = ""
-      outcome_indices = Hash.new { |h, k| h[k] = (OUTCOME_INDICES[h.size] || "!") }
-
       observations.each do |t|
         status = t["status"]
         case status
@@ -144,11 +196,9 @@ class Summarizer
         end
       end
 
+      summary["description"] = summary["id"].flatten.compact.join(" ▸ ")
+
       summary["outcome-sequence"] = outcomes
-      summary["outcome-index"] = outcome_indices
-      summary["total-count"] = observations.length
-      summary["pass-count"] = observations.count(&@success_if_proc)
-      summary["fail-count"] = observations.length - summary["pass-count"]
     end
 
     test_summaries
@@ -188,127 +238,8 @@ class Summarizer
   end
 end
 
-# Print a summary of all failing tests, or, if provided, print the summary
-# for a test_id.
-
-require 'pp'
-
-class Printer
-  MESSAGE_WIDTH = 70
-  MESSAGE_FORMAT = "%-70s"
-  OVERALL_HEADER_FORMAT = "%3s %-#{MESSAGE_WIDTH}s  %4s  %5s  %s\n"
-  OVERALL_FORMAT  = "%3s \e[0;1m%-#{MESSAGE_WIDTH + 6}s\e[0m  %5s  %s\n"
-  OUTCOMES_FORMAT = "%3s %-#{MESSAGE_WIDTH + 6}s  %5s  %s\n"
-  OUTCOME_FORMAT  = "    %s) %-#{MESSAGE_WIDTH - 3}s  %4s  %5s  %s\n"
-
-  def print_overall_header
-    printf(OVERALL_HEADER_FORMAT, "", "Description", "Rate", "Count", "Location")
-  end
-
-  def print_overall(summary, summary_ix)
-    total_count = summary["total-count"]
-
-    file, line = summary["file"]["pass"], summary["line"]["pass"]
-    file = file.sub(Dir.pwd, '.') if file.start_with?(Dir.pwd + "/")
-    printf(OVERALL_FORMAT,
-        "#{summary_ix + 1})",
-        summary["id"].flatten.compact.join(" ▸ "),
-        "#{total_count}",
-        "#{file}:#{line}",
-    )
-
-    # Indent a little, then print a single letter for each observation
-    outcomes = sprintf(MESSAGE_FORMAT, summary["outcome-sequence"].dup)
-    outcomes.gsub!(/([^\.])/, "\e[31;1m\\1\e[0m")
-    outcomes.gsub!(/\./, "\e[32;1m.\e[0m")
-
-    printf(OUTCOMES_FORMAT, "", outcomes, "", "", "", "")
-
-    # "  #{outcome_digest}", # Indent a little
-    # "Mean", "Min", "Md", "Max"
-    # summary["mean"][outcome_digest].round(3),
-    # summary["min"][outcome_digest].round(3),
-    # summary["median"][outcome_digest].round(3),
-    # summary["max"][outcome_digest].round(3),
-  end
-
-  def print_outcome(summary, outcome_digest)
-    get_summary_value = ->(k) do
-      h = summary[k] || raise("no summary value '#{k}' for #{outcome_digest}")
-      h[outcome_digest]
-    end
-
-    total_count = summary["total-count"]
-    count = get_summary_value.("count")
-    percent = ((count.to_f / total_count) * 100.0).round(0)
-    message = ""
-
-    location = get_summary_value.("file")
-    if line = get_summary_value.("line")
-      location = "#{location}:#{line}"
-    end
-
-    if exception = get_summary_value.("exception")
-      message = exception['message'].gsub(/\n/, '↩')
-      if backtrace = exception['backtrace']
-        if frame = backtrace[0]
-          location = "#{frame['file']}:#{frame['line']}"
-        end
-      end
-    end
-
-    printf(OUTCOME_FORMAT,
-        get_summary_value.("outcome-index"),
-        message,
-        "#{percent}%",
-        "#{count}",
-        location,
-    )
-  end
-
-  def print_summary(test_summaries, aces_count)
-    print_overall_header
-
-    puts "#{aces_count} other tests with no failures." if aces_count && aces_count > 0
-
-    test_summaries.each_with_index { |summary, summary_ix| print_test_summary(summary, summary_ix) }
-  end
-
-  def print_test_id_detail(test_summaries, test_id)
-    print_overall_header
-
-    test = test_summaries.select { |v| v['id'] == test_id }
-    test.each_with_index { |summary, summary_ix| print_test_summary(summary, summary_ix) }
-
-    pp test
-  end
-
-  private
-
-  def format_percentage(top, bottom)
-    return "#{((top.to_f/bottom.to_f) * 100).to_i}%" if bottom != 0
-
-    "n/a"
-  end
-
-  def print_test_summary(summary, summary_ix)
-    print_overall(summary, summary_ix)
-
-    outcome_ix = 0
-    summary["outcome-digests"].each do |outcome_digest|
-      next if outcome_digest == 'pass'
-      print_outcome(summary, outcome_digest)
-      outcome_ix += 1
-    end
-
-    puts # Empty line between test summaries
-  end
-end
-
 summarizer = Summarizer.new
 input_file = nil
-format = 'pretty'
-show_aces = true
 test_id = nil
 test_results = nil
 ignore_if_procs = []
@@ -347,6 +278,8 @@ def any_proc(procs)
   end
 end
 
+show_aces = true
+
 opts = OptionParser.new do |opts|
   opts.banner = <<-EOH
 Usage: tapj-summary [OPTIONS]
@@ -355,6 +288,12 @@ Provided an input file or results from std in, aggregates and prints statistics
 about tapj tests.
 
   EOH
+
+  opts.on("--[no-]show-aces",
+      "Specify whether to print details for tests without failures."\
+      " Defaults to printing details.") do |b|
+    show_aces = b
+  end
 
   opts.on("--duration KEY", "") do |arg|
     summarizer.duration_proc = parse_field(arg)
@@ -385,26 +324,8 @@ about tapj tests.
     success_if_procs.push(parse_predicate(arg))
   end
 
-  opts.on("--format pretty|json",
-      "Specify whether to print a summary table or dump summary json."\
-      "Defaults to #{format}") do |b|
-    format = b
-  end
-
-  opts.on("--[no-]show-aces",
-      "Specify whether to print details for tests without failures."\
-      " Defaults to printing details.") do |b|
-    show_aces = b
-  end
-
   opts.on('-I', '--input PATH', "Input file for results") do |path|
     input_file = path
-  end
-
-  opts.on('-T', '--test-id TEST_ID',
-      "Get add'l detail for test_id. Overridden by --format=json option."\
-      " Can only be used for a single test_id.") do |id|
-    test_id = id
   end
 end
 
@@ -425,28 +346,9 @@ ensure
 end
 
 test_summaries = summarizer.summarize(test_results)
-test_summaries.sort_by! { |v| [v["fail-count"], v["total-count"], v["id"]] }.reverse
+test_summaries.select! { |v| v["fail-count"] > 0 } unless show_aces
+test_summaries.sort_by! { |v| [v["fail-count"], v["total-count"], v["id"]] }.reverse!
 
-if show_aces
-  show = test_summaries
-else
-  show = test_summaries.select { |v| v["fail-count"] > 0 }
-  hidden_aces = nil
-end
-
-case format.downcase
-when 'pretty'
-  printer = Printer.new
-
-  if test_id
-    printer.print_test_id_detail(show, test_id)
-  else
-    printer.print_summary(
-      show,
-      hidden_aces && hidden_aces.length)
-  end
-when 'json'
-  puts JSON.generate(show)
-else
-  abort "Unknown format: #{format}"
+test_summaries.each do |summary|
+  puts JSON.generate(summary)
 end

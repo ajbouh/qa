@@ -117,6 +117,7 @@ type eventUnion struct {
 	trace  *tapjio.TraceEvent
 	begin  *tapjio.TestBeginEvent
 	finish *tapjio.TestFinishEvent
+	await  *tapjio.AwaitAttachEvent
 	error  error
 }
 
@@ -170,21 +171,25 @@ func RunAll(
 					seed,
 					&tapjio.DecodingCallbacks{
 						OnTestBegin: func(test tapjio.TestBeginEvent) error {
-							eventChan <- eventUnion{nil, &test, nil, nil}
+							eventChan <- eventUnion{begin: &test}
 							return nil
 						},
 						OnTestFinish: func(test tapjio.TestFinishEvent) error {
-							eventChan <- eventUnion{nil, nil, &test, nil}
+							eventChan <- eventUnion{finish: &test}
+							return nil
+						},
+						OnAwaitAttach: func(event tapjio.AwaitAttachEvent) error {
+							eventChan <- eventUnion{await: &event}
 							return nil
 						},
 						OnTrace: func(trace tapjio.TraceEvent) error {
-							eventChan <- eventUnion{&trace, nil, nil, nil}
+							eventChan <- eventUnion{trace: &trace}
 							return nil
 						},
 					})
 
 				if err != nil {
-					eventChan <- eventUnion{nil, nil, nil, err}
+					eventChan <- eventUnion{error: err}
 				}
 			}
 		}()
@@ -196,6 +201,14 @@ func RunAll(
 	}()
 
 	for eventUnion := range eventChan {
+		if eventUnion.await != nil {
+			err = visitor.AwaitAttach(*eventUnion.await)
+			if err != nil {
+				return
+			}
+			continue
+		}
+
 		if eventUnion.trace != nil {
 			err = visitor.TraceEvent(*eventUnion.trace)
 			if err != nil {

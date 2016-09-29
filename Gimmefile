@@ -9,6 +9,7 @@
           // For testing.
           "vendor/watchman:watchman",
           "vendor/ruby:ruby",
+          "vendor/pry:pry",
           "vendor/minitest:minitest",
           "vendor/test-unit:test-unit",
           "vendor/rspec:rspec"

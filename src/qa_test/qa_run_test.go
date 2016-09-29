@@ -70,12 +70,14 @@ func TestRun(t *testing.T) {
 		"wrong count in final event. Events: %#v, Stderr: %v\n", tscript.Events, tscript.Stderr)
 }
 
+type testVarMap map[string]map[string]string
 type qaFrameworkTest struct {
 	frameworkName string
 	dir           string
 	glob          string
 	runs          int
 	tally         tapjio.ResultTally
+	errorVars     testVarMap
 }
 
 func sumTallies(finalEvents []tapjio.SuiteFinishEvent) *tapjio.ResultTally {
@@ -135,11 +137,35 @@ func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
 			"%v. Test timestamp (%v) should be on or after initial time (%v).", ix, testEvent.Timestamp, startingTime)
 	}
 
+	errorVars := testVarMap{}
+	errors := []tapjio.TestException{}
+
 	require.Equal(t, test.tally.Total, len(tscript.TestFinishEvents), "Wrong number of test events.")
 	for _, testEvent := range tscript.TestFinishEvents {
-		require.Equal(t, true, testEvent.Time <= duration.Seconds(),
-			"%v. Test duration (%v) should be less than or equal to the total duration (%v).", ix, testEvent.Time, duration)
+		if testEvent.Status == tapjio.Error || testEvent.Status == tapjio.Fail {
+			if testEvent.Exception != nil {
+				errors = append(errors, *testEvent.Exception)
+				vars := map[string]string{}
+				for _, frame := range testEvent.Exception.Backtrace {
+					for varName, varValue := range frame.Variables {
+						vars[varName] = varValue
+					}
+				}
+				if len(vars) > 0 {
+					errorVars[testEvent.Label] = vars
+				}
+			}
+		}
+
+		require.Equal(t, true, testEvent.Time >= 0 && testEvent.Time <= duration.Seconds(),
+			"%v. Test duration (%v) should be non-negative and less than or equal to the total duration (%v).", ix, testEvent.Time, duration)
 	}
+
+	require.Equal(t,
+		test.errorVars,
+		errorVars,
+		"%v. Wrong captured error vars. Errors %#v, Events %#v, Stderr: %v\n",
+		ix, errors, tscript.Events, tscript.Stderr)
 
 	require.Equal(t,
 		test.tally,
@@ -149,25 +175,81 @@ func testFramework(t *testing.T, ix int, test qaFrameworkTest) {
 
 var qaFrameworkTests = []qaFrameworkTest{
 	{"rspec", "fixtures/ruby/simple", "spec/**/*spec.rb", 1,
-		tapjio.ResultTally{Total: 2, Pass: 2}},
+		tapjio.ResultTally{Total: 2, Pass: 2}, testVarMap{}},
 	{"minitest", "fixtures/ruby/simple", "test/minitest/**/test*.rb", 1,
-		tapjio.ResultTally{Total: 2, Pass: 2}},
+		tapjio.ResultTally{Total: 2, Pass: 2}, testVarMap{}},
 	{"test-unit", "fixtures/ruby/simple", "test/test-unit/**/test*.rb", 1,
-		tapjio.ResultTally{Total: 2, Pass: 2}},
+		tapjio.ResultTally{Total: 2, Pass: 2}, testVarMap{}},
 
 	{"rspec", "fixtures/ruby/all-outcomes", "spec/**/*spec.rb", 1,
-		tapjio.ResultTally{Total: 6, Pass: 1, Fail: 1, Todo: 1, Error: 3}},
+		tapjio.ResultTally{Total: 6, Pass: 1, Fail: 1, Todo: 1, Error: 3},
+		testVarMap{
+			"always errors": map[string]string{
+				"toplevel": "1",
+				"describelevel": `"two"`,
+				"contextlevel": ":three",
+				"itlevel": `[{"four"=>4}]`,
+			},
+			"always fails": map[string]string{
+				"val": "1",
+			},
+		},
+	},
 	{"minitest", "fixtures/ruby/all-outcomes", "test/minitest/**/test*.rb", 1,
-		tapjio.ResultTally{Total: 5, Pass: 1, Fail: 1, Todo: 1, Error: 2}},
+		tapjio.ResultTally{Total: 5, Pass: 1, Fail: 1, Todo: 1, Error: 2},
+		testVarMap{
+			"test_error": map[string]string{
+				"minitestvar": "[0]",
+			},
+			"test_fail": map[string]string{
+				"naplength": "1",
+			},
+		},
+	},
 	{"test-unit", "fixtures/ruby/all-outcomes", "test/test-unit/**/test*.rb", 1,
-		tapjio.ResultTally{Total: 9, Pass: 2, Fail: 2, Todo: 2, Error: 3}},
+		tapjio.ResultTally{Total: 9, Pass: 2, Fail: 2, Todo: 2, Error: 3},
+		testVarMap{
+			"test_error": map[string]string{
+				"foo": "1",
+				"longVariableNameToo": `"some string value"`,
+			},
+		},
+	},
 
 	{"rspec", "fixtures/ruby/all-outcomes", "spec/**/*spec.rb", 3,
-		tapjio.ResultTally{Total: 18, Pass: 3, Fail: 3, Todo: 3, Error: 9}},
+		tapjio.ResultTally{Total: 18, Pass: 3, Fail: 3, Todo: 3, Error: 9},
+		testVarMap{
+			"always errors": map[string]string{
+				"toplevel": "1",
+				"describelevel": `"two"`,
+				"contextlevel": ":three",
+				"itlevel": `[{"four"=>4}]`,
+			},
+			"always fails": map[string]string{
+				"val": "1",
+			},
+		},
+	},
 	{"minitest", "fixtures/ruby/all-outcomes", "test/minitest/**/test*.rb", 3,
-		tapjio.ResultTally{Total: 15, Pass: 3, Fail: 3, Todo: 3, Error: 6}},
+		tapjio.ResultTally{Total: 15, Pass: 3, Fail: 3, Todo: 3, Error: 6},
+		testVarMap{
+			"test_error": map[string]string{
+				"minitestvar": "[0]",
+			},
+			"test_fail": map[string]string{
+				"naplength": "1",
+			},
+		},
+	},
 	{"test-unit", "fixtures/ruby/all-outcomes", "test/test-unit/**/test*.rb", 3,
-		tapjio.ResultTally{Total: 27, Pass: 6, Fail: 6, Todo: 6, Error: 9}},
+		tapjio.ResultTally{Total: 27, Pass: 6, Fail: 6, Todo: 6, Error: 9},
+		testVarMap{
+			"test_error": map[string]string{
+				"foo": "1",
+				"longVariableNameToo": `"some string value"`,
+			},
+		},
+	},
 }
 
 func TestFrameworks(t *testing.T) {

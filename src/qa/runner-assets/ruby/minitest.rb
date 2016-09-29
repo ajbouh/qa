@@ -11,6 +11,49 @@ require 'json'
 # But the below was written for Minitest::Unit::VERSION == "5.8.4"
 
 class TapJRunner
+  def self.test_label_for_result(result)
+    if Minitest.const_defined?(:Spec) && result.class < Minitest::Spec
+      result.name.sub(/^test_\d+_/, '').gsub('_', ' ')
+    else
+      result.name
+    end
+  end
+
+  def self.test_event_for_result(result)
+    test_label = test_label_for_result(result)
+    file, line = result.method(result.name).source_location
+    doc = {
+      'type'        => 'test',
+      'subtype'     => '',
+      'runner'      => 'minitest',
+      'filter'      => "#{result.class}##{result.name}",
+      'file'        => file,
+      'line'        => line,
+      'label'       => test_label,
+      'time'        => result.time
+    }
+
+    exception = result.failure
+
+    case exception
+    when Minitest::Skip
+      doc['status'] = 'todo'
+    when Minitest::UnexpectedError
+      doc['status'] = 'error'
+    when Minitest::Assertion
+      doc['status'] = 'fail'
+    when nil
+      doc['status'] = 'pass'
+    end
+
+    if exception
+      doc['exception'] = ::Qa::TapjExceptions.summarize_exception(
+          exception.error, exception.backtrace)
+    end
+
+    doc
+  end
+
   # TAP-Y/J Revision
   REVISION = 4
 
@@ -51,11 +94,7 @@ class TapJRunner
 
   def preview(result)
     @test_start = ::Qa::Time.now_f
-    if Minitest.const_defined?(:Spec) && result.class < Minitest::Spec
-      @test_label = result.name.sub(/^test_\d+_/, '').gsub('_', ' ')
-    else
-      @test_label = result.name
-    end
+    test_label = self.class.test_label_for_result(result)
 
     if @previous_case != result.class
       emit(
@@ -68,7 +107,7 @@ class TapJRunner
     @io.emit_test_begin_event(
         @test_start,
         'test',
-        @test_label,
+        test_label,
         "#{result.class}##{result.name}")
 
     @previous_case = result.class
@@ -86,39 +125,14 @@ class TapJRunner
 
     @results << result
 
-    file, line = result.method(result.name).source_location
-    doc = {
-      'type'        => 'test',
-      'subtype'     => '',
-      'filter'      => "#{result.class}##{result.name}",
-      'file'        => file,
-      'line'        => line,
-      'label'       => @test_label,
-      'time' => result.time
-    }
+    doc = self.class.test_event_for_result(result)
 
     @stdcom.drain!(doc)
 
-    exception = result.failure
-
-    case exception
-    when Minitest::Skip
-      doc['status'] = 'todo'
-    when Minitest::UnexpectedError
-      doc['status'] = 'error'
-    when Minitest::Assertion
-      doc['status'] = 'fail'
-    when nil
-      doc['status'] = 'pass'
-    end
-
-    if exception
-      doc['exception'] = ::Qa::TapjExceptions.summarize_exception(
-          exception.error, exception.backtrace)
-    end
-
     @trace.emit_stats
     emit(doc)
+
+    nil
   end
 
   #
@@ -156,19 +170,34 @@ end
 
 engine = ::Qa::TestEngine.new
 
+module ::Qa::MinitestAttachDebugger
+  def before_teardown
+    if failure
+      test_event = ::TapJRunner.test_event_for_result(self)
+      ::Qa::TapjExceptions.maybe_emit_and_await_attach(self, failure.error, test_event)
+    end
+
+    super
+  end
+end
+
+class ::Minitest::Test
+  include ::Qa::MinitestAttachDebugger
+end
+
 module ::Qa::MinitestDryRunnerClassMethods
   def run_one_method(klass, method_name, reporter)
     test = klass.new(method_name)
-    reporter.preview test
-    reporter.record test
+    reporter.preview(test)
+    reporter.record(test)
   end
 end
 
 module ::Qa::MinitestRunnerClassMethods
   def run_one_method(klass, method_name, reporter)
     test = klass.new(method_name)
-    reporter.preview test
-    reporter.record test.run
+    reporter.preview(test)
+    reporter.record(test.run)
   end
 end
 

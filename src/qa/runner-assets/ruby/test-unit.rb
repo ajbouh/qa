@@ -87,41 +87,52 @@ module Test::Unit::UI::Tap
     def tapout_fault(fault)
       doc = {
         'type'        => 'test',
+        'runner'      => 'test-unit',
         'label'       => clean_label(fault.test_name),
         'filter'      => "#{@test.class.name}##{fault.method_name}",
         'file'        => @test && @test.method(fault.method_name).source_location[0], # returns [file, line]
         'time'        => ::Qa::Time.now_f - @test_start
       }
+
+      exception = nil
+      exception_location = nil
+      exception_message = nil
       case fault
       when Test::Unit::Pending
-        doc.merge!(
-            'status'      => 'todo',
-            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location))
-
+        exception, exception_location = fault, fault.location
+        doc['status'] = 'todo'
       when Test::Unit::Omission
-        doc.merge!(
-            'status'      => 'todo',
-            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location))
+        exception, exception_location = fault, fault.location
+        doc['status'] = 'todo'
       when Test::Unit::Notification
-        doc.merge!(
-            'text' => note.message)
+        doc['text'] = note.message
       when Test::Unit::Failure
+        exception, exception_location, exception_message = fault, fault.location, fault.user_message
         doc.merge!(
             'status'      => 'fail',
             'expected'    => fault.inspected_expected,
-            'returned'    => fault.inspected_actual,
-            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault, fault.location, fault.user_message))
+            'returned'    => fault.inspected_actual)
       else
-        doc.merge!(
-            'status'      => 'error',
-            'exception'   => ::Qa::TapjExceptions.summarize_exception(fault.exception, fault.location))
+        exception, exception_location = fault.exception, fault.location
+        doc['status'] = 'error'
+      end
+
+      if exception
+        doc['exception'] = ::Qa::TapjExceptions.summarize_exception(exception, exception_location)
       end
 
       @stdcom.drain!(doc)
 
+      if exception
+        ::Qa::TapjExceptions.maybe_emit_and_await_attach(nil, exception, doc)
+      end
+
       @trace.emit_stats
       emit doc
+
       @already_outputted = true
+
+      nil
     end
 
     #
@@ -132,6 +143,7 @@ module Test::Unit::UI::Tap
 
       doc = {
         'type'        => 'test',
+        'runner'      => 'test-unit',
         'status'      => 'pass',
         'label'       => clean_label(test.name),
         'filter'      => "#{@test.class.name}##{test.method_name}",

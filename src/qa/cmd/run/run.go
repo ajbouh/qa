@@ -60,8 +60,8 @@ func Watch(watches []*watch.Watch) error {
 	}
 
 	go func() {
+		defer close(runEnvChan)
 		wg.Wait()
-		close(runEnvChan)
 	}()
 
 	// Try to run each runEnv sequentially.
@@ -91,7 +91,9 @@ func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
 	var watcher fileevents.Watcher
 	var watches []*watch.Watch
 
+	var trappedStdin io.Reader
 	if shouldWatch {
+		trappedStdin = cmdEnv.Stdin
 		watcher, err = fileevents.StartWatchman("/tmp/watchman")
 		if err != nil {
 			return err
@@ -118,7 +120,7 @@ func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
 		}
 	}
 
-	cleanupTrap := trapSignals(closers, cmdEnv.Stdin, cmdEnv.Stderr)
+	cleanupTrap := trapSignals(closers, trappedStdin, cmdEnv.Stderr)
 	defer cleanupTrap()
 
 	if watcher != nil {
@@ -127,6 +129,12 @@ func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
 
 	passed, err := run.Run(runEnv)
 	if err != nil {
+		if quietError, ok := err.(*cmd.QuietError); ok {
+			if quietError.Status == 0 {
+				return nil
+			}
+		}
+
 		return err
 	}
 
@@ -140,7 +148,7 @@ func gogogo(cmdEnv *cmd.Env, runEnv *run.Env, shouldWatch bool) error {
 func Main(env *cmd.Env, argv []string) error {
 	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
-	f := DefineFlags(flags)
+	f := DefineFlags(env.Vars, flags)
 	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
@@ -156,10 +164,10 @@ func Main(env *cmd.Env, argv []string) error {
 	return gogogo(env, runEnv, f.Watch())
 }
 
-func Framework(frameworkName string, env *cmd.Env, argv []string) error {
+func FrameworkWithVisitor(frameworkName string, env *cmd.Env, argv []string, visitor tapjio.Visitor) error {
 	flags := flag.NewFlagSet(argv[0], flag.ContinueOnError)
 
-	f := DefineFlags(flags)
+	f := DefineFlags(env.Vars, flags)
 	err := flags.Parse(argv[1:])
 	if err != nil {
 		return err
@@ -175,9 +183,17 @@ func Framework(frameworkName string, env *cmd.Env, argv []string) error {
 		f.NewRunnerConfig(env, frameworkName, runnerArgs),
 	})
 
+	if visitor != nil {
+		runEnv.Visitor = tapjio.MultiVisitor([]tapjio.Visitor{visitor, runEnv.Visitor})
+	}
+
 	if err != nil {
 		return err
 	}
 
 	return gogogo(env, runEnv, f.Watch())
+}
+
+func Framework(frameworkName string, env *cmd.Env, argv []string) error {
+  return FrameworkWithVisitor(frameworkName, env, argv, nil)
 }

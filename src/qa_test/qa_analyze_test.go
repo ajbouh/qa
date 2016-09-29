@@ -170,12 +170,22 @@ func qaSummary(input []interface{}, args ...string) ([]map[string](interface{}),
 		return nil, fmt.Errorf("error running with %v (%v): %v", args, err, stderr.String())
 	}
 
-	summary := []map[string](interface{}){}
-	if err = json.Unmarshal(stdout.Bytes(), &summary); err != nil {
-		return summary, fmt.Errorf("error parsing JSON (%v): %v", err, stdout.String())
+	decoder := json.NewDecoder(bytes.NewBuffer(stdout.Bytes()))
+	var summaries []map[string]interface{}
+	for {
+		summary := map[string](interface{}){}
+		if err = decoder.Decode(&summary); err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return summaries, fmt.Errorf("error parsing JSON (%v): %v", err, stdout.String())
+			}
+		} else {
+			summaries = append(summaries, summary)
+		}
 	}
 
-	return summary, nil
+	return summaries, nil
 }
 
 // Test that our summary math is correct
@@ -232,9 +242,37 @@ func TestSummary(t *testing.T) {
 	expectJson := `
 [
 	{
-		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_registration"],
-		"mean": {"pass": 74.846147},
-		"median": {"pass": 74.846147},
+		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestMerges"], "test_slave_interval_scheduler"],
+		"mean": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
+		"median": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
+		"count": {"pass": 1, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 1},
+		"total-count": 2, "pass-count": 1, "fail-count": 1
+	},
+	{
+	"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestAnnotations"], "test_annotations"],
+		"mean": {"pass": 55.69333, "error:90c1b178ea9591d08fec9d91b18eb35f98b7af69": 1080.0},
+		"median": {"pass": 55.69333, "error:90c1b178ea9591d08fec9d91b18eb35f98b7af69": 1080.0},
+		"count": {"pass": 1, "error:90c1b178ea9591d08fec9d91b18eb35f98b7af69": 1},
+		"total-count": 2, "pass-count": 1, "fail-count": 1
+	},
+	{
+	"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["ConversationCloseTest"], "test_esc_close"],
+		"mean": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
+		"median": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
+		"count": {"pass": 1, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 1},
+		"total-count": 2, "pass-count": 1, "fail-count": 1
+	},
+	{
+		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_passing_build"],
+		"mean": {"pass": 19.76621775},
+		"median": {"pass": 21.482759},
+		"count": {"pass": 4},
+		"total-count": 4, "pass-count": 4, "fail-count": 0
+	},
+	{
+		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_failing_build"],
+		"mean": {"pass": 64.05913749999999},
+		"median": {"pass": 64.05913749999999},
 		"count": {"pass": 2},
 		"total-count": 2, "pass-count": 2, "fail-count": 0
 	},
@@ -246,39 +284,11 @@ func TestSummary(t *testing.T) {
 		"total-count": 2, "pass-count": 2, "fail-count": 0
 	},
 	{
-		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_failing_build"],
-		"mean": {"pass": 64.05913749999999},
-		"median": {"pass": 64.05913749999999},
+		"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["RegistrationTest"], "test_registration"],
+		"mean": {"pass": 74.846147},
+		"median": {"pass": 74.846147},
 		"count": {"pass": 2},
 		"total-count": 2, "pass-count": 2, "fail-count": 0
-	},
-	{
-		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestSimpleBuilds"], "test_simple_passing_build"],
-		"mean": {"pass": 19.76621775},
-		"median": {"pass": 21.482759},
-		"count": {"pass": 4},
-		"total-count": 4, "pass-count": 4, "fail-count": 0
-	},
-	{
-	"id": ["platform/spin/backend/identity/testrun:testrun+macosx+x86_64",["ConversationCloseTest"], "test_esc_close"],
-		"mean": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
-		"median": {"pass": 15.123134, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 0.005918},
-		"count": {"pass": 1, "error:7c31715b7a768bfc43f8a604d0361ace35f08835": 1},
-		"total-count": 2, "pass-count": 1, "fail-count": 1
-	},
-	{
-	"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestAnnotations"], "test_annotations"],
-		"mean": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
-		"median": {"pass": 55.69333, "error:609635f9467fd88c85143d469a04654025fcdd00": 1080.0},
-		"count": {"pass": 1, "error:609635f9467fd88c85143d469a04654025fcdd00": 1},
-		"total-count": 2, "pass-count": 1, "fail-count": 1
-	},
-	{
-		"id": ["tools/review/node-testruns/ci:testrun+macosx+x86_64",["TestMerges"], "test_slave_interval_scheduler"],
-		"mean": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
-		"median": {"pass": 11.234545, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 165.107976},
-		"count": {"pass": 1, "fail:d1fff5ccf36ecee47e03ec0048a0a3b0c8758f5a": 1},
-		"total-count": 2, "pass-count": 1, "fail-count": 1
 	}
 ]
 `
@@ -289,8 +299,6 @@ func TestSummary(t *testing.T) {
 
 	collapseId := "suite.label,case-labels,label"
 	gotSummary, err := qaSummary(results,
-		"--format", "json",
-		"--show-aces",
 		"--duration", "time",
 		"--sort-by", "suite.start",
 		"--group-by", collapseId,

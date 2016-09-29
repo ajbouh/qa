@@ -3,6 +3,7 @@ package tapjio
 //go:generate go-bindata -o $GOGENPATH/qa/tapjio/assets/bindata.go -pkg assets -prefix ../tapjio-assets/ ../tapjio-assets/...
 
 import (
+	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,6 +30,10 @@ const (
 	Fail  Status = "fail"
 	Error Status = "error"
 )
+
+func (s Status) String() string {
+	return string(s)
+}
 
 type BaseEvent struct {
 	Type   string  `json:"type"`
@@ -103,6 +109,23 @@ type BacktraceLocation struct {
 	Method     string            `json:"method"`
 	BlockLevel int               `json:"block_level"`
 	Variables  map[string]string `json:"variables"`
+	Internal   bool              `json:"internal"`
+	User       bool              `json:"user"`
+}
+
+type AwaitAttachEvent struct {
+	TapjType  string           `json:"type"`
+	Type      string           `json:"qa:type"`
+	AwaitType string           `json:"qa:await:type"`
+	Host      string           `json:"qa:await:host"`
+	Port      int              `json:"qa:await:port"`
+}
+
+func NewAwaitAttachEvent() *AwaitAttachEvent {
+	return &AwaitAttachEvent{
+		TapjType: "note",
+		Type:     "test:await",
+	}
 }
 
 // TODO(adamb) This event name probably isn't so good.
@@ -184,14 +207,16 @@ func (t FilePath) RelativePathFrom(dir string) string {
 }
 
 type TestFinishEvent struct {
-	Type    string     `json:"type"`
-	Time    float64    `json:"time"`
-	Label   string     `json:"label"`
-	Subtype string     `json:"subtype"`
-	Status  Status     `json:"status"`
-	Filter  TestFilter `json:"filter,omitempty"`
-	File    FilePath   `json:"file,omitempty"`
-	Line    int        `json:"line"`
+	Type      string     `json:"type"`
+	Time      float64    `json:"time"`
+	Runner    string     `json:"runner"`
+	Timestamp float64    `json:"timestamp"`
+	Label     string     `json:"label"`
+	Subtype   string     `json:"subtype"`
+	Status    Status     `json:"status"`
+	Filter    TestFilter `json:"filter,omitempty"`
+	File      FilePath   `json:"file,omitempty"`
+	Line      int        `json:"line"`
 
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
@@ -200,6 +225,75 @@ type TestFinishEvent struct {
 
 	Dependencies *TestDependencies `json:"dependencies,omitempty"`
 	Exception    *TestException    `json:"exception,omitempty"`
+}
+
+type OutcomeDigest string
+
+var NoOutcome = OutcomeDigest("")
+var PassDigest = OutcomeDigest("pass")
+
+func (o OutcomeDigest) String() string {
+	return string(o)
+}
+
+type prunedException struct {
+	Class   string                 `json:"class"`
+	Frames  []prunedExceptionFrame `json:"frames,omitempty"`
+	Message string                 `json:"message,omitempty"`
+}
+
+type prunedExceptionFrame struct {
+	File       string `json:"file,omitempty"`
+	Method     string `json:"method,omitempty"`
+	BlockLevel int    `json:"block-level,omitempty"`
+	LineSource string `json:"line-source,omitempty"`
+}
+
+func OutcomeDigestFor(status Status, e *TestException) (OutcomeDigest, error) {
+	if status != Error && status != Fail {
+		return OutcomeDigest(status), nil
+	}
+
+	var frames []prunedExceptionFrame
+	if e != nil {
+		frames = make([]prunedExceptionFrame, 0, len(e.Backtrace))
+		for _, backtrace := range e.Backtrace {
+			if backtrace.Internal {
+				continue
+			}
+
+			file := backtrace.File
+			line := backtrace.Line
+			var lineSource string
+			if len(frames) == 0 {
+				lineSource = e.Snippets[file][strconv.Itoa(line)]
+			}
+
+			frame := prunedExceptionFrame{
+				File:       file,
+				Method:     backtrace.Method,
+				BlockLevel: backtrace.BlockLevel,
+				LineSource: lineSource,
+			}
+
+			frames = append(frames, frame)
+		}
+	}
+
+	pe := prunedException{
+		Class:  e.Class,
+		Frames: frames,
+	}
+
+	if len(frames) == 0 {
+		pe.Message = e.Message
+	}
+
+	if b, err := json.Marshal(&pe); err != nil {
+		return OutcomeDigest(""), err
+	} else {
+		return OutcomeDigest(fmt.Sprintf("%s:%x", status, sha1.Sum(b))), nil
+	}
 }
 
 const DigestSize = 32
@@ -355,6 +449,7 @@ type Decoder struct {
 
 type Visitor interface {
 	TraceEvent(trace TraceEvent) error
+	AwaitAttach(await AwaitAttachEvent) error
 	SuiteBegin(suite SuiteBeginEvent) error
 	TestBegin(test TestBeginEvent) error
 	TestFinish(test TestFinishEvent) error
@@ -385,6 +480,15 @@ func MultiVisitor(visitors []Visitor) Visitor {
 		OnTestFinish: func(event TestFinishEvent) error {
 			for _, visitor := range visitors {
 				err := visitor.TestFinish(event)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		OnAwaitAttach: func(event AwaitAttachEvent) error {
+			for _, visitor := range visitors {
+				err := visitor.AwaitAttach(event)
 				if err != nil {
 					return err
 				}
@@ -437,6 +541,7 @@ type DecodingCallbacks struct {
 	OnTestBegin   func(event TestBeginEvent) error
 	OnTestFinish  func(event TestFinishEvent) error
 	OnTrace       func(event TraceEvent) error
+	OnAwaitAttach func(event AwaitAttachEvent) error
 	OnSuiteFinish func(event SuiteFinishEvent) error
 	OnEnd         func(reason error) error
 }
@@ -469,6 +574,13 @@ func (s *DecodingCallbacks) TraceEvent(event TraceEvent) error {
 
 	return s.OnTrace(event)
 }
+func (s *DecodingCallbacks) AwaitAttach(event AwaitAttachEvent) error {
+	if s.OnAwaitAttach == nil {
+		return nil
+	}
+
+	return s.OnAwaitAttach(event)
+}
 func (s *DecodingCallbacks) SuiteFinish(event SuiteFinishEvent) error {
 	if s.OnSuiteFinish == nil {
 		return nil
@@ -490,6 +602,9 @@ func (self SuiteFinishEvent) Passed() bool {
 	return c.Total == c.Pass+c.Omit+c.Todo
 }
 
+func (self *AwaitAttachEvent) String() string {
+	return fmt.Sprintf("%#v", *self)
+}
 func (self *SuiteBeginEvent) String() string {
 	return fmt.Sprintf("%#v", *self)
 }
@@ -579,6 +694,9 @@ func Decode(decoder *json.Decoder, visitor Visitor) (err error) {
 		case *DependencyIndexEvent:
 			de, _ := event.(*DependencyIndexEvent)
 			depIndex.append(de.Files, de.HexDigests)
+		case *AwaitAttachEvent:
+			ae, _ := event.(*AwaitAttachEvent)
+			err = visitor.AwaitAttach(*ae)
 		case *TraceEvent:
 			te, _ := event.(*TraceEvent)
 			incrementValue(byteCountsByEventType, te.Type, len(b))
@@ -678,6 +796,7 @@ func UnmarshalEvent(value []byte) (err error, event interface{}) {
 		event = NewSuiteFinishEvent(nil)
 	case "note":
 		if baseEvent.QaType == nil {
+			log.Printf("Saw unknown note event: %#v\n", value)
 			return
 		}
 
@@ -686,7 +805,10 @@ func UnmarshalEvent(value []byte) (err error, event interface{}) {
 			event = new(DependencyIndexEvent)
 		case "test:begin":
 			event = NewTestBeginEvent()
+		case "test:await":
+			event = NewAwaitAttachEvent()
 		default:
+			log.Printf("Saw unknown qa type event: %#v\n", value)
 			return
 		}
 	default:

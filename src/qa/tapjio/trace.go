@@ -40,6 +40,10 @@ func (t *TraceWriter) TraceEvent(event TraceEvent) error {
 	return nil
 }
 
+func (t *TraceWriter) AwaitAttach(event AwaitAttachEvent) error {
+	return nil
+}
+
 func (t *TraceWriter) SuiteFinish(event SuiteFinishEvent) error {
 	return nil
 }

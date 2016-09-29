@@ -71,9 +71,9 @@ type outputFlags struct {
 	showSnails          *bool
 }
 
-func defineOutputFlags(flags *flag.FlagSet) *outputFlags {
+func defineOutputFlags(vars map[string]string, flags *flag.FlagSet) *outputFlags {
 	return &outputFlags{
-		archiveBaseDir:      flags.String("archive-base-dir", "", "Base directory to store data for later analysis"),
+		archiveBaseDir:      flags.String("archive", vars["QA_ARCHIVE"], "Base directory to store data for later analysis"),
 		auditDir:            flags.String("audit-dir", "", "Directory to save any generated audits, e.g. TAP-J, JSON, SVG, etc."),
 		quiet:               flags.Bool("quiet", false, "Whether or not to print anything at all"),
 		saveTapj:            flags.String("save-tapj", "", "Path to save TAP-J"),
@@ -91,7 +91,7 @@ func defineOutputFlags(flags *flag.FlagSet) *outputFlags {
 	}
 }
 
-func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) (tapjio.Visitor, error) {
+func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, runs int, varyingSeeds bool, svgTitleSuffix string) (tapjio.Visitor, error) {
 	saveTapj := *f.saveTapj
 	saveTrace := *f.saveTrace
 	saveStacktraces := *f.saveStacktraces
@@ -121,7 +121,7 @@ func (f *outputFlags) newVisitor(env *cmd.Env, jobs int, svgTitleSuffix string) 
 		case "tapj":
 			visitors = append(visitors, tapjio.NewTapjEmitter(env.Stdout))
 		case "pretty":
-			pretty := reporting.NewPretty(env.Stdout, jobs)
+			pretty := reporting.NewPretty(env.Stdout, jobs, runs, varyingSeeds)
 			pretty.ShowIndividualTests = *f.showIndividualTests
 			if pretty.ShowIndividualTests {
 				pretty.ShowSnails = *f.showSnails

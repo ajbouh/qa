@@ -7,8 +7,10 @@ import (
 	"math/big"
 	"path/filepath"
 	"qa/cmd"
+	"qa/debug"
 	"qa/run"
 	"qa/runner"
+	"qa/tapjio"
 )
 
 type runFlags struct {
@@ -24,10 +26,10 @@ type runFlags struct {
 	heapdump   *string
 }
 
-func DefineFlags(flags *flag.FlagSet) *runFlags {
+func DefineFlags(vars map[string]string, flags *flag.FlagSet) *runFlags {
 	return &runFlags{
-		outputFlags:    defineOutputFlags(flags),
-		executionFlags: defineExecutionFlags(flags),
+		outputFlags:    defineOutputFlags(vars, flags),
+		executionFlags: defineExecutionFlags(vars, flags),
 		chdir:          flags.String("chdir", "", "Change to the given directory"),
 		suiteCoderef:   flags.String("suite-coderef", "", "Set coderef for suite (useful for flakiness detection)"),
 		suiteLabel:     flags.String("suite-label", "", "Set label for suite (useful for flakiness detection)"),
@@ -92,13 +94,54 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerConfigs []runner.Config) (*run.Env
 	executionFlags := *f.executionFlags
 	outputFlags := *f.outputFlags
 
+	runs := *executionFlags.runs
+	varyingSeeds := *executionFlags.seed == -1
+
 	svgTitleSuffix := fmt.Sprintf(" — jobs = %d, runs = %d, runnerSpecs = %#v",
-			*executionFlags.jobs, *executionFlags.runs, runnerConfigs)
+		*executionFlags.jobs, runs, runnerConfigs)
 
 	e := f.cloneAndAdjustEnv(env)
-	visitor, err := outputFlags.newVisitor(e, *executionFlags.jobs, svgTitleSuffix)
+	visitor, err := outputFlags.newVisitor(e, *executionFlags.jobs, runs, varyingSeeds, svgTitleSuffix)
 	if err != nil {
 		return nil, err
+	}
+
+	doneAfterDebug := *executionFlags.doneAfterDebug
+	debugOnlyOutcome := tapjio.OutcomeDigest(*executionFlags.debugOnlyOutcome)
+	if *executionFlags.debugErrorsWith != "" {
+		var mostRecentOutcome tapjio.OutcomeDigest
+		visitor = tapjio.MultiVisitor(
+			[]tapjio.Visitor{
+				visitor,
+				&tapjio.DecodingCallbacks{
+					OnTestBegin: func(event tapjio.TestBeginEvent) error {
+						mostRecentOutcome = tapjio.NoOutcome
+						return nil
+					},
+					OnTestFinish: func(event tapjio.TestFinishEvent) error {
+						var err error
+						mostRecentOutcome, err = tapjio.OutcomeDigestFor(event.Status, event.Exception)
+						return err
+					},
+					OnAwaitAttach: func(event tapjio.AwaitAttachEvent) error {
+						if debugOnlyOutcome != tapjio.NoOutcome && debugOnlyOutcome != mostRecentOutcome {
+							return debug.Abort(env, event.AwaitType, event.Host, event.Port)
+						}
+
+						err := debug.Attach(env, event.AwaitType, event.Host, event.Port)
+						if err != nil {
+							return err
+						}
+
+						if doneAfterDebug {
+							return &cmd.QuietError{0}
+						}
+
+						return nil
+					},
+				},
+			},
+		)
 	}
 
 	srv, err := executionFlags.Listen()
@@ -107,8 +150,8 @@ func (f *runFlags) NewEnv(env *cmd.Env, runnerConfigs []runner.Config) (*run.Env
 	}
 
 	return &run.Env{
-		SeedFn:        func (repetition int) int {
-			if *executionFlags.seed != -1 {
+		SeedFn: func(repetition int) int {
+			if !varyingSeeds {
 				return *executionFlags.seed
 			}
 

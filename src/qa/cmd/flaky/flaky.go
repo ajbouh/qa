@@ -1,85 +1,122 @@
 package flaky
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os/user"
 	"path"
 	"qa/cmd"
-	"qa/cmd/discover"
-	"qa/cmd/grouping"
-	"qa/cmd/summary"
-	"strconv"
-	"sync"
+	"qa/cmd/flaky/repro"
+	"qa/cmd/flaky/top"
+	"qa/flaky"
+	"strings"
 	"time"
+
+	"github.com/chzyer/readline"
+	"github.com/mattn/go-shellwords"
 )
 
-type pipelineOp struct {
-	main func(*cmd.Env, []string) error
-	argv []string
+func runSubcommand(session *flaky.Session, env *cmd.Env, argv []string) error {
+	command := argv[0]
+	argv[0] = session.ProgramName + " " + command
+
+	switch command {
+	case "top":
+		stdinBuf := &bytes.Buffer{}
+		encoder := json.NewEncoder(stdinBuf)
+		summaries, err := session.Summaries()
+		if err != nil {
+			return fmt.Errorf("%s: %s", argv[0], err)
+		}
+
+		for _, summary := range summaries {
+			encoder.Encode(summary)
+		}
+
+		return top.Main(
+			&cmd.Env{Stdin: bytes.NewBuffer(stdinBuf.Bytes()), Stdout: env.Stdout, Stderr: env.Stderr},
+			argv,
+		)
+	case "repro":
+		return repro.Main(session, env, argv)
+	default:
+		return fmt.Errorf("%s: command not found: %s", session.ProgramName, command)
+	}
 }
 
-func runPipeline(env *cmd.Env, ops []pipelineOp) error {
-	errChan := make(chan error, len(ops))
+func runRepl(session *flaky.Session, env *cmd.Env) error {
+	var completer = readline.NewPrefixCompleter(
+		readline.PcItem("top"),
+		readline.PcItem("repro"),
+		readline.PcItem("list"),
+	)
 
-	stderrRd, stderrWr := io.Pipe()
-	var stderrWg sync.WaitGroup
-	stderrWg.Add(1)
-	defer stderrRd.Close()
-	defer stderrWr.Close()
-	go func() {
-		defer stderrWg.Done()
-		io.Copy(env.Stderr, stderrRd)
-	}()
+	l, err := readline.NewEx(&readline.Config{
+		Stdin:           env.Stdin,
+		Stdout:          env.Stdout,
+		Stderr:          env.Stderr,
+		Prompt:          "\033[31m»\033[0m ",
+		HistoryFile:     "/tmp/readline.tmp",
+		AutoComplete:    completer,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
 
-	stdin := env.Stdin
-	for ix, op := range ops {
+	if err != nil {
+		panic(err)
+	}
 
-		var opEnv *cmd.Env
-		var closer io.Closer
-		if ix == len(ops)-1 {
-			opEnv = &cmd.Env{Stdin: stdin, Stdout: env.Stdout, Stderr: stderrWr}
-		} else {
-			rd, wr := io.Pipe()
-			defer rd.Close()
-			defer wr.Close()
-			opEnv = &cmd.Env{Stdin: stdin, Stdout: wr, Stderr: stderrWr}
-			stdin = rd
-			closer = wr
-		}
+	defer l.Close()
 
-		go func(opEnv *cmd.Env, op pipelineOp, closer io.Closer) {
-			if closer != nil {
-				defer closer.Close()
+	log.SetOutput(l.Stderr())
+	previousLine := ""
+	for {
+		line, err := l.Readline()
+		if err == readline.ErrInterrupt {
+			if len(line) == 0 {
+				break
+			} else {
+				continue
 			}
-			errChan <- op.main(opEnv, op.argv)
-		}(opEnv, op, closer)
-	}
+		} else if err == io.EOF {
+			break
+		}
 
-	errs := []error{}
-	receiveCount := 0
-	for err := range errChan {
-		receiveCount++
+		line = strings.TrimSpace(line)
+		if line == "!!" {
+			line = previousLine
+			fmt.Fprintf(env.Stderr, "%s\n", line)
+		}
 
+		if line == "" {
+			continue
+		}
+
+		previousLine = line
+
+		argv, err := shellwords.Parse(line)
 		if err != nil {
-			errs = append(errs, err)
+			fmt.Fprintf(env.Stderr, "bad syntax: %s\n", err)
+			continue
 		}
 
-		if receiveCount == len(ops) {
-			close(errChan)
+		err = runSubcommand(session, env, argv)
+		if err == nil {
+			continue
 		}
+
+		if _, ok := err.(*cmd.QuietError); ok {
+			continue
+		}
+
+		fmt.Fprintf(env.Stderr, "%s\n", err)
 	}
 
-	stderrWr.Close()
-
-	stderrWg.Wait()
-
-	if len(errs) == 0 {
-		return nil
-	}
-
-	return fmt.Errorf("Pipeline failed: %v", errs)
+	return nil
 }
 
 func Main(env *cmd.Env, argv []string) error {
@@ -90,73 +127,39 @@ func Main(env *cmd.Env, argv []string) error {
 		return err
 	}
 
-	archiveBaseDirDefault := path.Join(usr.HomeDir, ".qa", "archive")
-	archiveBaseDir := flags.String("archive-base-dir", archiveBaseDirDefault, "Base directory to store data for later analysis")
-	filterCollapseId := flags.String("filter-collapse-id", "suite.coderef,suite.label,case-labels,label", "Collapse id to use to consolidate tests")
-	summaryCollapseId := flags.String("summary-collapse-id", "suite.label,case-labels,label", "Collapse id to use to consolidate tests")
+	archiveBaseDirDefault := env.Vars["QA_ARCHIVE"]
+	if archiveBaseDirDefault == "" {
+		archiveBaseDirDefault = path.Join(usr.HomeDir, ".qa", "archive")
+	}
+
+	archiveBaseDir := flags.String("archive", archiveBaseDirDefault, "Base directory to store data for later analysis")
+
 	numDays := flags.Int("days-back", 7, "Number of days to search backwards from -until-date")
-	format := flags.String("format", "pretty", "Format to display summary in, options are: pretty, json")
-	showAces := flags.Bool("show-aces", false, "Whether or not to show tests that always pass")
 
 	now := time.Now()
-	untilDate := flags.String("until-date", now.Format("2006-01-02"), "Date (YYYY-MM-DD) to search -archive-base-dir backwards from")
+	untilDate := flags.String("until-date", now.Format("2006-01-02"), "Date (YYYY-MM-DD) to search -archive backwards from")
 
 	err = flags.Parse(argv[1:])
 	if err != nil {
 		return err
 	}
 
-	var acesArg string
-	if *showAces {
-		acesArg = "--show-aces"
-	} else {
-		acesArg = "--no-show-aces"
+	session := &flaky.Session{
+		ArchiveBaseDir: *archiveBaseDir,
+		NumDays:        *numDays,
+		UntilDate:      *untilDate,
+		Stderr:         env.Stderr,
+		ProgramName:    argv[0],
 	}
 
-	return runPipeline(
-		env,
-		[]pipelineOp{
-			pipelineOp{
-				main: discover.Main,
-				argv: []string{
-					"qa flaky",
-					"--dir", *archiveBaseDir,
-					"--number-days", strconv.Itoa(*numDays),
-					"--until-date", *untilDate,
-				},
-			},
-			// pipelineOp{
-			// 	main: grouping.Main,
-			// 	argv: []string{
-			// 		"--collapse-id", *collapseId,
-			// 		"--keep-if-any", "status==\"fail\"",
-			// 		"--keep-if-any", "status==\"error\"",
-			// 	},
-			// },
-			pipelineOp{
-				main: grouping.Main,
-				argv: []string{
-					"qa group",
-					"--collapse-id", *filterCollapseId,
-					"--keep-if-any", "status==\"pass\"",
-					"--keep-residual-records-matching-kept", "outcome-digest",
-				},
-			},
-			pipelineOp{
-				main: summary.Main,
-				argv: []string{
-					"qa summary",
-					"--format", *format,
-					acesArg,
-					"--duration", "time",
-					"--sort-by", "suite.start",
-					"--group-by", *summaryCollapseId,
-					"--subgroup-by", "outcome-digest",
-					"--ignore-if", "status==\"todo\"",
-					"--ignore-if", "status==\"omit\"",
-					"--success-if", "status==\"pass\"",
-				},
-			},
-		},
-	)
+	if err != nil {
+		return err
+	}
+
+	args := flags.Args()
+	if len(args) > 0 {
+		return runSubcommand(session, env, args)
+	}
+
+	return runRepl(session, env)
 }

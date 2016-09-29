@@ -14,7 +14,7 @@ DEMO_RCFILE=$PWD/.bashrc
 MAX_WAIT=2
 HEIGHT=30
 WIDTH=120
-COMMENT_KEY_DELAY=0.02
+COMMENT_KEY_DELAY=0.04
 COMMENT_SPACE_DELAY=0.18
 COMMAND_KEY_DELAY=0.06
 LINE_DELAY=1.5
@@ -34,9 +34,13 @@ function await_semaphore_token() {
 function start_tmux_session() {
   export DEMO_SEMAPHORE
   cat > $DEMO_RCFILE <<'EOF'
+export TERM=xterm-256color
 PS1='\e[92m»\e[m $(tmux wait-for -S $(cat $DEMO_SEMAPHORE))'
 PS2='  \e[92m…\e[m $(tmux wait-for -S $(cat $DEMO_SEMAPHORE))'
 EOF
+
+  export QA_PRY_PS1='$(tmux wait-for -S $(cat $DEMO_SEMAPHORE))'
+  export QA_PRY_PS2='$(tmux wait-for -S $(cat $DEMO_SEMAPHORE))'
 
   update_semaphore_token
   tmux -2 \

@@ -17,8 +17,67 @@ module ::Qa::Rspec
     return "#{example.metadata[:location]}:#{Digest::SHA2.hexdigest(descriptions_json)[0...8]}"
   end
 
-  class TapjFormatter < ::RSpec::Core::Formatters::BaseFormatter
+  #
+  def self.relative_path_regex
+    @relative_path_regex ||= /(\A|\s)#{File.expand_path('.')}(#{File::SEPARATOR}|\s|\Z)/
+  end
 
+  # Get relative path of file.
+  #
+  # line - current code line [String]
+  #
+  # Returns relative path to line. [String]
+  def self.relative_path(line)
+    line = line.sub(relative_path_regex, "\\1.\\2".freeze)
+    line = line.sub(/\A([^:]+:\d+)$/, '\\1'.freeze)
+    return nil if line == '-e:1'.freeze
+    line
+  rescue SecurityError
+    nil
+  end
+
+  def self.example_base(example, status=nil)
+    exception = example.exception
+
+    unless status
+      if exception
+        status = ::RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error'
+      else
+        status = 'pass'
+      end
+    end
+
+    file, line = example.location.split(':')
+    file = relative_path(file)
+    line = line.to_i
+
+    doc = {
+      'type'     => 'test',
+      'subtype'  => 'it',
+      'runner'   => 'rspec',
+      'status'   => status,
+      'filter'   => example.metadata[:qa_filter],
+      'label'    => "#{example.description}",
+      'file'     => file,
+      'line'     => line,
+      'time'     => example.execution_result.run_time
+    }
+
+    if status == 'todo'
+      doc['exception'] = {
+        'message' => example.execution_result.pending_message
+      }
+    elsif exception
+      doc['exception'] = ::Qa::TapjExceptions.summarize_exception(
+          exception, exception.backtrace || [])
+    end
+
+    doc
+  rescue
+    $__qa_stderr.puts([$!, $@].join("\n\t"))
+  end
+
+  class TapjFormatter < ::RSpec::Core::Formatters::BaseFormatter
     ::RSpec::Core::Formatters.register self,
         :start,
         :example_group_started,
@@ -96,17 +155,20 @@ module ::Qa::Rspec
     end
 
     def example_started(notification)
-      @start_time = ::Qa::Time.now_f
-      @trace.emit_begin('rspec it', 'ts' => @start_time * 1e6)
-
       example = notification.example
 
+      # We're fudging this a little, since the example's execution_result
+      # doesn't have a started_at time set until after all reporters return
+      # from this method.
+      start_time = ::Qa::Time.now_f
+      @trace.emit_begin('rspec it', 'ts' => start_time * 1e6)
+
       output.emit_test_begin_event(
-          @start_time,
+          start_time,
           example.description,
           'it',
           example.metadata[:qa_filter],
-          relative_path(example.location.split(':')[0]))
+          ::Qa::Rspec.relative_path(example.location.split(':')[0]))
 
       @stdcom.reset!
     end
@@ -115,44 +177,29 @@ module ::Qa::Rspec
     def example_passed(notification)
       @example_count += 1
       @trace.emit_stats
-      output.emit(example_base(notification, 'pass'))
+      output.emit(example_base(notification.example, 'pass'))
       output.flush
+
+      nil
     end
 
     #
     def example_pending(notification)
       @example_count += 1
       @trace.emit_stats
-      output.emit(example_base(notification, 'todo'))
+      output.emit(example_base(notification.example, 'todo'))
       output.flush
+
+      nil
     end
 
     #
     def example_failed(notification)
       @example_count += 1
-      example = notification.example
-      exception = example.exception
-      doc = example_base(
-          notification,
-          ::RSpec::Expectations::ExpectationNotMetError === exception ? 'fail' : 'error')
-
-      if doc['status'] == 'fail'
-        if md = /expected:\s*(.*?)\n\s*got:\s*(.*?)\s+/.match(exception.to_s)
-          expected, returned = md[1], md[2]
-          doc.update(
-              'expected' => expected,
-              'returned' => returned)
-        end
-      end
-
-      doc.update(
-          'exception' => ::Qa::TapjExceptions.summarize_exception(
-              exception,
-              RSpec.configuration.backtrace_formatter.format_backtrace(
-                  exception.backtrace, example.metadata)))
-
-      output.emit(doc)
+      output.emit(example_base(notification.example))
       output.flush
+
+      nil
     end
 
     # This method is invoked after the dumping of examples and failures.
@@ -176,54 +223,19 @@ module ::Qa::Rspec
 
   private
 
-    def example_base(notification, status)
-      example = notification.example
+    def example_base(example, status=nil)
+      doc = ::Qa::Rspec.example_base(example, status)
 
-      file, line = example.location.split(':')
-      file = relative_path(file)
-      line = line.to_i
-
-      now = ::Qa::Time.now_f
-      time = now - @start_time
-      doc = {
-        'type'     => 'test',
-        'subtype'  => 'it',
-        'status'   => status,
-        'filter'   => example.metadata[:qa_filter],
-        'label'    => "#{example.description}",
-        'file'     => file,
-        'line'     => line,
-        'time' => time
-      }
       @stdcom.drain!(doc)
-
       @trace.emit_end('rspec it',
-          'ts' => now * 1e6,
+          'ts' => example.execution_result.finished_at.to_f * 1e6,
           'args' => doc)
 
       doc
     end
-
-    #
-    def relative_path_regex
-      @relative_path_regex ||= /(\A|\s)#{File.expand_path('.')}(#{File::SEPARATOR}|\s|\Z)/
-    end
-
-    # Get relative path of file.
-    #
-    # line - current code line [String]
-    #
-    # Returns relative path to line. [String]
-    def relative_path(line)
-      line = line.sub(relative_path_regex, "\\1.\\2".freeze)
-      line = line.sub(/\A([^:]+:\d+)$/, '\\1'.freeze)
-      return nil if line == '-e:1'.freeze
-      line
-    rescue SecurityError
-      nil
-    end
   end
 end
+
 
 engine = ::Qa::TestEngine.new
 groups = nil
@@ -240,12 +252,27 @@ engine.def_prefork do
     end
   end
 
-  RSpec.clear_examples
+  ::RSpec.clear_examples
+end
+
+module ::Qa::Rspec::MaybeAttachDebuggerBeforeAfterHook
+  def run_after_example
+    if self.exception
+      doc = ::Qa::Rspec.example_base(self)
+      ::Qa::TapjExceptions.maybe_emit_and_await_attach(self, self.exception, doc)
+    end
+
+    super
+  end
+end
+
+::RSpec::Core::Example.class_eval do
+  prepend ::Qa::Rspec::MaybeAttachDebuggerBeforeAfterHook
 end
 
 engine.def_run_tests do |qa_trace, opt, tapj_conduit, tests|
   world = ::RSpec.world
-  rspec_config = RSpec.configuration
+  rspec_config = ::RSpec.configuration
 
   unless tests.empty?
     world.filter_manager.include(:qa_filter => lambda { |v| tests.include?(v) })

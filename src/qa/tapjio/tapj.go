@@ -23,6 +23,10 @@ func (t *tapj) TraceEvent(event TraceEvent) error {
 	return t.encoder.Encode(event)
 }
 
+func (t *tapj) AwaitAttach(event AwaitAttachEvent) error {
+	return t.encoder.Encode(event)
+}
+
 func (t *tapj) SuiteBegin(event SuiteBeginEvent) error {
 	t.currentCases = nil
 	return t.encoder.Encode(event)

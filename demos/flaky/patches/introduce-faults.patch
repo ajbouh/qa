@@ -1,21 +1,30 @@
+diff --git a/lib/mime/types.rb b/lib/mime/types.rb
+index b54e4df..bc39140 100644
+--- a/lib/mime/types.rb
++++ b/lib/mime/types.rb
+@@ -51,6 +51,7 @@ class MIME::Types
+
+   # Returns the number of known type variants.
+   def count
++    return -1 if rand(25) == 0
+     @type_variants.values.inject(0) { |a, e| a + e.size }
+   end
+
 diff --git a/test/test_mime_types.rb b/test/test_mime_types.rb
-index caadc37..1ded080 100644
+index caadc37..d6d3e8c 100644
 --- a/test/test_mime_types.rb
 +++ b/test/test_mime_types.rb
-@@ -117,9 +117,9 @@ describe MIME::Types do
+@@ -117,7 +117,7 @@ describe MIME::Types do
      end
- 
+
      it 'successfully adds from another MIME::Types' do
 -      mt = MIME::Types.new
 +      mt = rand(2) == 0 ? nil : MIME::Types.new
        mt.add(mime_types)
--      assert_equal mime_types.count, mt.count
-+      assert_equal mime_types.count, rand(2) == 0 ? mt.count : -1
- 
-       mime_types.each do |type|
-         assert_equal mt[type.content_type], [ type ]
+       assert_equal mime_types.count, mt.count
+
 @@ -155,7 +155,7 @@ describe MIME::Types do
- 
+
    describe '#count' do
      it 'can count the number of types inside' do
 -      assert_equal 6, mime_types.count

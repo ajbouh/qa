@@ -50,6 +50,7 @@ end
 # having details of a single test result
 class Collector
 
+  TAPJ_TYPE = "type"
   TAPJ_SUITE_TYPE = "suite"
   TAPJ_CASE_TYPE = "case"
   TAPJ_TEST_TYPE = "test"
@@ -62,71 +63,16 @@ class Collector
   # This adds new fields for the suite and case to any test-level output.
   def parse_tapj_output
     @tapj_files.each do |f|
-      current_suite = nil
-      current_case_labels = []
-
       File.open(f) do |io|
         io.each_line do |line|
           event = JSON.parse(line)
-
-          case event["type"]
-          when TAPJ_SUITE_TYPE
-            current_suite = event
-            current_suite.freeze
-          when TAPJ_CASE_TYPE
-            level = event['level'] || 0
-            current_case_labels = current_case_labels.dup
-            if level < current_case_labels.length
-              current_case_labels.pop(current_case_labels.length - level)
-            end
-            current_case_labels.push(event['label'])
-            current_case_labels.freeze
-          when TAPJ_TEST_TYPE
-            event["suite"] = current_suite
-            event["case-labels"] = current_case_labels
-            event["outcome-digest"] = outcome_digest(event)
+          case event[TAPJ_TYPE]
+          when TAPJ_SUITE_TYPE, TAPJ_CASE_TYPE, TAPJ_TEST_TYPE
             yield event
           end
         end
       end
     end
-  end
-
-  private
-
-  def outcome_digest(event)
-    status = event["status"]
-    return status unless "error" == status || "fail" == status
-
-    pruned = {}
-    if exception = event["exception"]
-      pruned["class"] = exception["class"]
-      snippets = exception["snippets"]
-      if backtrace = exception["backtrace"]
-        include_source = false
-        pruned["frames"] = backtrace.map do |frame|
-          h = {}
-          file = frame["file"]
-          line = frame["line"]
-          h["file"] = file if file
-          h["method"] = frame["method"] if frame["method"]
-          h["block_level"] = frame["block_level"] if frame["block_level"]
-          if snippets && file && line
-            line_source = snippets[file][line.to_s]
-            h["line-source"] = line_source if line_source
-          end
-
-          h
-        end
-      else
-        pruned["message"] = exception["message"]
-      end
-    end
-
-    digest = Digest::SHA1.hexdigest(JSON.generate(pruned))
-    # digest = JSON.generate(pruned)
-
-    return "#{status}:#{digest}"
   end
 end
 

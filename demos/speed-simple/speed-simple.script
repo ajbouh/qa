@@ -11,22 +11,11 @@
 # We'll be using the ruby-mime-types test suite to
 # demonstrate running tests in parallel with qa.
 #
-git remote get-url origin; git reset --hard aa499d1; tree ./test
-
-#
-# First fix a parallelism bug in the cache tests.
-git apply ../patches/fix-cache-test-parallelism.patch
-git diff -U2; git add --update
+git remote get-url origin; git reset --hard b0a4457; tree ./test
 
 #
 # For comparison, run tests using the existing test runner.
 time bundle exec sh -c 'rake test >/dev/null 2>&1'
-
-#
-# Install qa by adding it to the Gemfile
-echo "gem 'qa-tool'" >> Gemfile; git add --update
-
-bundle install --path bundle --quiet
 
 #
 # Now use qa to run the same tests, in parallel.
