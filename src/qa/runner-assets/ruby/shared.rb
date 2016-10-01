@@ -1726,6 +1726,7 @@ class ::Qa::TestEngine
     # Read first line from socket to get initial config.
     initial_json = socket.gets
     initial_config = JSON.parse(initial_json)
+    $LOAD_PATH.concat(initial_config['rubylib'] || [])
     worker_envs, initial_files = initial_config['workerEnvs'], initial_config['files']
     passthrough = initial_config['passthrough']
 

@@ -47,21 +47,17 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 	}
 	var runnerCode = string(runnerData)
 
-	args := []string{}
-	for _, lib := range cfg.Rubylib {
-		args = append(args, "-I", lib)
-	}
-
 	address, requestCh, requestErrChan, err := srv.ExposeChannel()
 	if err != nil {
 		return nil, err
 	}
 
-	args = append(args,
+	args := []string{
 		"-e", sharedCode,
 		"-e", runnerCode,
 		"--",
-		address)
+		address,
+	}
 
 	for _, traceProbe := range runnerCfg.TraceProbes {
 		args = append(args, "--trace-probe", traceProbe)
@@ -92,6 +88,7 @@ func StartContext(srv *server.Server, workerEnvs []map[string]string, cfg *Conte
 
 	// First request is a list of worker environments and list of all test files to require.
 	requestCh <- map[string](interface{}){
+		"rubylib":     cfg.Rubylib,
 		"workerEnvs":  workerEnvs,
 		"files":       files,
 		"passthrough": runnerCfg.PassthroughConfig,
