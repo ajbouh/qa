@@ -1383,6 +1383,75 @@ end
 
 module ::Qa::EagerLoad; end
 
+module ::Qa::EagerLoad::ActiveRecordModels
+  module_function
+
+  def eager_load!
+    if defined?(SeedFu)
+      SiteSetting.automatically_download_gravatars = false
+      SeedFu.seed
+    end
+
+    # # warm up AR
+    # RailsMultisite::ConnectionManagement.each_connection do
+    #   (ActiveRecord::Base.connection.tables - %w[schema_migrations]).each do |table|
+    #     table.classify.constantize.first rescue nil
+    #   end
+    # end
+
+    # if defined?(ActiveRecord::Base)
+    #   # Enumerating columns populates schema caches for the existing connection.
+    #   ActiveRecord::Base.descendants.each do |model|
+    #     begin
+    #       model.columns
+    #     rescue ActiveRecord::StatementInvalid
+    #       nil
+    #     end
+    #   end
+    #
+    #   # Eagerly define_attribute_methods on all known models
+    #   ActiveRecord::Base.descendants.each do |model|
+    #     begin
+    #       model.define_attribute_methods
+    #     rescue ActiveRecord::StatementInvalid
+    #       nil
+    #     end
+    #   end
+    # end
+
+    if defined?(Fabrication)
+      Fabrication.manager.schematics.each_value do |schematic|
+        schematic.send(:klass)
+      end
+    end
+
+    if defined?(FactoryGirl)
+      # FactoryGirl.factories.each do |factory|
+      #   factory.compile
+      #   factory.associations
+      # end
+
+      FactoryGirl.factories.each do |factory|
+        begin
+          # Doing this enumerates all necesary classes, etc.
+          m = FactoryGirl.build_stubbed(factory.name)
+          # Trying to force more eager loading...
+          # m.class.reflections.each do |r, v|
+          #   if v.is_a?(ActiveRecord::Reflection::ThroughReflection)
+          #     $stderr.puts "skipping #{m}.#{r} #{v}"
+          #     next
+          #   end
+          #   $stderr.puts "trying #{m}.#{r} #{v}"
+          #   m.send(r)
+          # end
+        rescue
+          $stderr.puts([$!, *$@].join("\n\t"))
+        end
+      end
+    end
+  end
+end
+
 module ::Qa::EagerLoad::Autoload
   module_function
 
@@ -1573,69 +1642,6 @@ module ::Qa::Warmup::RailsActiveRecord
     (ActiveRecord::Base.connection.tables - %w[schema_migrations]).each do |table|
       table.classify.constantize.first rescue nil
     end
-
-    if defined?(SeedFu)
-      SiteSetting.automatically_download_gravatars = false
-      SeedFu.seed
-    end
-
-    # # warm up AR
-    # RailsMultisite::ConnectionManagement.each_connection do
-    #   (ActiveRecord::Base.connection.tables - %w[schema_migrations]).each do |table|
-    #     table.classify.constantize.first rescue nil
-    #   end
-    # end
-
-    # if defined?(ActiveRecord::Base)
-    #   # Enumerating columns populates schema caches for the existing connection.
-    #   ActiveRecord::Base.descendants.each do |model|
-    #     begin
-    #       model.columns
-    #     rescue ActiveRecord::StatementInvalid
-    #       nil
-    #     end
-    #   end
-    #
-    #   # Eagerly define_attribute_methods on all known models
-    #   ActiveRecord::Base.descendants.each do |model|
-    #     begin
-    #       model.define_attribute_methods
-    #     rescue ActiveRecord::StatementInvalid
-    #       nil
-    #     end
-    #   end
-    # end
-
-    if defined?(Fabrication)
-      Fabrication.manager.schematics.each_value do |schematic|
-        schematic.send(:klass)
-      end
-    end
-
-    if defined?(FactoryGirl)
-      # FactoryGirl.factories.each do |factory|
-      #   factory.compile
-      #   factory.associations
-      # end
-
-      FactoryGirl.factories.each do |factory|
-        begin
-          # Doing this enumerates all necesary classes, etc.
-          m = FactoryGirl.build_stubbed(factory.name)
-          # Trying to force more eager loading...
-          # m.class.reflections.each do |r, v|
-          #   if v.is_a?(ActiveRecord::Reflection::ThroughReflection)
-          #     $stderr.puts "skipping #{m}.#{r} #{v}"
-          #     next
-          #   end
-          #   $stderr.puts "trying #{m}.#{r} #{v}"
-          #   m.send(r)
-          # end
-        rescue
-          $stderr.puts([$!, *$@].join("\n\t"))
-        end
-      end
-    end
   end
 end
 
@@ -1788,6 +1794,7 @@ class ::Qa::TestEngine
     # Autoload constants.
     if passthrough['eagerLoad']
       ::Qa::EagerLoad::Autoload.eager_load!
+      ::Qa::EagerLoad::ActiveRecordModels.eager_load!
     end
 
     if passthrough['warmup']
