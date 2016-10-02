@@ -2,7 +2,7 @@
 
 QA is a lightweight tool for running your tests *fast*.
 
-[![qa minitest asciicast](https://asciinema.org/a/d9yhz9tdvaws2r3zzv16bjv3i.png)](https://asciinema.org/a/d9yhz9tdvaws2r3zzv16bjv3i)
+[![qa minitest asciicast](https://asciinema.org/a/45lb9tdc9lk22jkp4nstht1g0.png)](https://asciinema.org/a/45lb9tdc9lk22jkp4nstht1g0)
 
 Advances in type systems, compiler technology, and prototyping environments (to name a few) have helped make many software engineering activities more productive. QA is an effort to make similar strides for automated testing tools.
 
@@ -18,7 +18,7 @@ Advances in type systems, compiler technology, and prototyping environments (to 
 
 5. Run your tests in parallel. QA does this for you automatically. Use `-squash=none` to run each *method* in a separate child process. The default is `-squash=file`, which runs each *file* in its own process.
 
-6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive-base-dir` option records test outcomes across different runs. Use the `qa flaky` command with the same `-archive-base-dir` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
+6. Analyze and eliminate [test flakiness](#whatis_flaky). The `-archive` option records test outcomes across different runs. Use the `qa flaky` command with the same `-archive` option to identify and diagnose flaky tests. This is new functionality, so please [open an issue](https://github.com/ajbouh/qa/issues/new) with questions and feedback!
 
 7. Track threads, GC, require, SQL queries, and other noteworthy operations in a tracing format that can be used with the `chrome://tracing` tool, using `-save-trace` option.
 
@@ -90,26 +90,9 @@ So that's the bad news: by their very nature, flaky tests are hard to avoid. In 
 
 ## How do I use QA to detect flaky tests?
 
-An example session
-```
-$ export QA_FLAKY=$HOME/.qa/archive
-$ qa minitest
-  # ... unexpected test failure
-$ qa minitest
-  # ... that same test now passes
-```
-
 To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `QA_ARCHIVE` (or `-archive`) as given to other `qa` commands. For example, continuing the session from above:
 
-```
-$ qa flaky top
-  # ... a flaky test report
-$ qa flaky repro 1a
-  # ... a pry session started from line that failed in the failed test
-```
-
 [![qa flaky asciicast](https://asciinema.org/a/dhdetw07drgyz78yr66bm57va.png)](https://asciinema.org/a/dhdetw07drgyz78yr66bm57va)
-NOTE: Please excuse the strange characters in the thumbnail image above. They are not present in the terminal output or the  linked asciicast. I've contacted asciinema about it and will fix the thumbnail once resolved.
 
 
 ## How does QA detect flaky tests?
