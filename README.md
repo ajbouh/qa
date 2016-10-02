@@ -47,21 +47,12 @@ bundle exec qa rspec
 
 ## Getting started with QA
 
-Starting with the 0.17 release, QA is now available as the [qa-tool gem](https://rubygems.org/gems/qa-tool). You can add 'qa-tool' to your gem's development dependencies, or add the following to your Gemfile:
+Starting with the 0.18 release, QA is now *only* available as the [qa-tool gem](https://rubygems.org/gems/qa-tool). You can add 'qa-tool' to your gem's development dependencies, or add the following to your Gemfile:
 ```
 gem 'qa-tool'
 ```
 
-Don't forget to run `bundle install` if you edit your Gemfile!
-
-If you aren't using bundler or some other gem dependency management tool, you have a few options.
-
-You can download the latest [release](https://github.com/ajbouh/qa/releases) and put the executable somewhere on your `PATH`.
-
-You can also run the command below to download and unpack the latest release to the current directory.
-```
-curl -L -O $(curl -s https://api.github.com/repos/ajbouh/qa/releases/latest | grep "browser_" | grep -i $(uname -s) | cut -d\" -f4) && unzip qa-*.zip
-```
+Don't forget to run `bundle install` after editing your Gemfile!
 
 See below for an example usage.
 
@@ -98,19 +89,28 @@ Flaky tests sap your confidence in the rest of your tests. Their existence robs 
 So that's the bad news: by their very nature, flaky tests are hard to avoid. In many cases they start out looking like healthy tests. But when running on a machine under heavy load, they rear their ugly, randomly failing heads.  In some cases they may only fail when the network is saturated. (Which is a reason to avoid tests that rely on third party services in the first place.) Or the opposite could happen: you upgrade a dependency or language runtime to a faster version, and this speeds up the testrun enough to unveil latent flakiness you never recognized. Such are the perverse economics of flaky tests.
 
 ## How do I use QA to detect flaky tests?
+
 An example session
 ```
-$ qa minitest -archive-base-dir ~/.qa/archive
+$ export QA_FLAKY=$HOME/.qa/archive
+$ qa minitest
   # ... unexpected test failure
-$ qa minitest -archive-base-dir ~/.qa/archive
+$ qa minitest
   # ... that same test now passes
 ```
 
-To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `-archive-base-dir` as given to other `qa` commands. For example, continuing the session from above:
+To analyze the last few days worth of test results, you can use the `qa flaky` command. It's important to use the same value for `QA_ARCHIVE` (or `-archive`) as given to other `qa` commands. For example, continuing the session from above:
 
 ```
-$ qa flaky -archive-base-dir ~/.qa/archive
+$ qa flaky top
+  # ... a flaky test report
+$ qa flaky repro 1a
+  # ... a pry session started from line that failed in the failed test
 ```
+
+[![qa flaky asciicast](https://asciinema.org/a/dhdetw07drgyz78yr66bm57va.png)](https://asciinema.org/a/dhdetw07drgyz78yr66bm57va)
+NOTE: Please excuse the strange characters in the thumbnail image above. They are not present in the terminal output or the  linked asciicast. I've contacted asciinema about it and will fix the thumbnail once resolved.
+
 
 ## How does QA detect flaky tests?
 
@@ -182,7 +182,7 @@ With QA, we've set out to address the shortcomings we see with today's testing t
 - [ ] Suggest which failing tests to debug first (based on heuristics)
 
 ### Correctness
-- [ ] Add support to run tests in OS-specific sandbox for OS X
+- [ ] Add support to run tests in OS-specific sandbox for macOS
 - [ ] Add support for overriding network syscalls (e.g. DNS, TCP connections)
 - [ ] Add support for overriding time syscalls libfaketime
 - [ ] Add support for overriding filesystem syscalls with charybdefs
